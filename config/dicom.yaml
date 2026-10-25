@@ -1,0 +1,4 @@
+ae_title: OB_REPORT_APP
+port: 11112
+storage_dir: data/received
+log_level: INFO
