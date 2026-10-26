@@ -3,6 +3,15 @@ Report template composition rules. Each template lists the blocks
 that appear and in what order. Placeholders are field IDs from fields.py.
 """
 
+TEMPLATES = {
+    "EARLY_OBS":   "Early OBS scan",
+    "T2_PRE20":    "Second trimester (≤22 weeks)",
+    "T2_POST20":   "Second trimester (>22 weeks)",
+    "T3":          "Third trimester",
+    "LEVEL2":      "Anomaly / Level II scan",
+    "OBS_DOPPLER": "OBS with colour Doppler",
+}
+
 BLOCKS = {
     "HEADER":   ["patient_name", "patient_age", "report_date", "referred_by"],
     "LMP":      ["lmp"],
