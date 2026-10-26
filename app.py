@@ -6,7 +6,7 @@ from shared.fields import FIELDS, TEMPLATES, FIELD_BY_ID
 from shared.templates import TEMPLATE_BLOCKS, BLOCKS
 
 # ============================================================
-# TEXT GENERATOR (MIRRORS YOUR RADIOLOGY APP)
+# TEXT GENERATOR
 # ============================================================
 
 def generate_ob_report(template_id, data):
