@@ -1,26 +1,20 @@
 import streamlit as st
 import html
+import hashlib
 from datetime import datetime
 
 from shared.fields import FIELDS, TEMPLATES, FIELD_BY_ID
 from shared.templates import TEMPLATE_BLOCKS, BLOCKS
 
 # ============================================================
-# TEXT GENERATOR
+# TEXT GENERATOR (FINDINGS)
 # ============================================================
 
-def generate_ob_report(template_id, data):
-    """Takes the data dictionary and returns formatted paragraphs."""
+def generate_findings(template_id, data):
+    """Takes the data dictionary and returns formatted findings paragraphs."""
     out = []
     
-    # 1. Header
-    if data.get("patient_name"):
-        out.append(f"NAME :- {data['patient_name']}      DATE :- {data['report_date']}")
-    if data.get("lmp"):
-        out.append(f"LMP :- {data['lmp']}")
-    out.append("")
-    
-    # 2. Title based on template
+    # 1. Header & Title
     if template_id == "EARLY_OBS":
         out.append("EARLY OBS SCAN")
     elif template_id == "LEVEL2":
@@ -29,7 +23,7 @@ def generate_ob_report(template_id, data):
         out.append("ULTRASOUND OBSTETRICS REPORT")
     out.append("")
 
-    # 3. Early OBS specific
+    # 2. Early OBS specific
     if template_id == "EARLY_OBS":
         gs = data.get("gsac_status", "")
         msd = data.get("msd", "")
@@ -51,7 +45,7 @@ def generate_ob_report(template_id, data):
         out.append("")
         return "\n".join(out)
 
-    # 4. Intro (Normal OB templates)
+    # 3. Intro (Normal OB templates)
     presentation = data.get("presentation", "variable")
     lie = data.get("lie", "")
     lie_str = f" and {lie} lie" if lie else ""
@@ -61,7 +55,7 @@ def generate_ob_report(template_id, data):
                f"Fetal cardiac pulsations are appreciated.")
     out.append("")
     
-    # 5. Biometry Table
+    # 4. Biometry Table
     out.append("BIO PHYSICAL PARAMETERS:")
     out.append(f"BPD: {data.get('bpd', '')}mm")
     out.append(f"HC: {data.get('hc', '')}mm")
@@ -76,7 +70,7 @@ def generate_ob_report(template_id, data):
     out.append(f"FHR is approx. {data.get('fhr', '')} /min.")
     out.append("")
     
-    # 6. Doppler
+    # 5. Doppler
     if data.get("mean_uterine_pi"):
         out.append(f"Mean Uterine Artery PI Is {data['mean_uterine_pi']} (WNL, No Notching)")
     if data.get("right_uterine_pi"):
@@ -85,7 +79,7 @@ def generate_ob_report(template_id, data):
         out.append(f"Umbilical Artery PI is {data['umbilical_pi']} (WNL)")
     out.append("")
     
-    # 7. Anatomy
+    # 6. Anatomy
     out.append(f"Placenta is {data.get('placenta_position', '').upper()} and away from the Os.")
     out.append(f"CERVIX: normal ({data.get('cervix_length', '')}cm), internal Os is {data.get('internal_os', '')}.")
     
@@ -96,21 +90,26 @@ def generate_ob_report(template_id, data):
         out.append("LOOP OF CORD SEEN AROUND THE NECK.")
     out.append("")
 
-    # 8. Scar thickness (T3 only)
+    # 7. Scar thickness (T3 only)
     if template_id == "T3" and data.get("scar_thickness"):
          out.append(f"Scar thickness measures {data['scar_thickness']}mm.")
          out.append("")
 
-    # 9. Impression
-    out.append("IMPRESSION:")
-    if template_id == "T3":
-        out.append(f"Ultrasound obstetric reveals single live intrauterine fetus in cephalic presentation "
-                   f"of approx. {data.get('mean_age', '')} gestation age.")
-    else:
-        out.append(f"Ultrasound obstetric reveals single live intrauterine fetus in variable presentation "
-                   f"of approx. {data.get('mean_age', '')} gestation age.")
-
     return "\n".join(out)
+
+# ============================================================
+# AUTO IMPRESSION GENERATOR
+# ============================================================
+
+def generate_impression(template_id, data):
+    if template_id == "EARLY_OBS":
+        return "Intra uterine live pregnancy of 10wks 01days +/-1w with good cardiac activity."
+    
+    age = data.get('mean_age', '')
+    if template_id == "T3":
+        return f"Ultrasound obstetric reveals single live intrauterine fetus in cephalic presentation of approx. {age} gestation age."
+    else:
+        return f"Ultrasound obstetric reveals single live intrauterine fetus in variable presentation of approx. {age} gestation age."
 
 # ============================================================
 # STREAMLIT UI & CSS
@@ -118,7 +117,6 @@ def generate_ob_report(template_id, data):
 
 st.set_page_config(page_title="डॉ. प्रणव एवं डॉ. गौरव इमेजिंग, आगरा", layout="wide")
 
-# EXACT CSS FROM RADIOLOGY APP
 st.markdown(
     """
     <style>
@@ -198,12 +196,16 @@ st.markdown(
         min-height: 42px !important;
         box-sizing: border-box !important;
     }
-    .stButton button {
+    .stButton button,
+    .stDownloadButton button,
+    div[data-testid="stButton"] button,
+    div[data-testid="stDownloadButton"] button {
         background-color: #ffffff !important;
         color: #111111 !important;
         border: 1px solid #cfd6dd !important;
     }
-    .stButton button:hover {
+    .stButton button:hover,
+    .stDownloadButton button:hover {
         background-color: #eef2f7 !important;
         border-color: #305496 !important;
     }
@@ -227,12 +229,23 @@ st.markdown(
         margin-bottom: 8px !important;
         display: block !important;
     }
+    /* Impression Box CSS */
+    div[class*="st-key-impression_box"] textarea {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+        font-family: Consolas, Menlo, 'Courier New', monospace !important;
+        font-size: 12.5px !important;
+        line-height: 1.5 !important;
+        border: 1px solid #333 !important;
+        white-space: pre-wrap !important;
+        word-wrap: break-word !important;
+        overflow-wrap: anywhere !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# HEADER
 st.markdown(
     """
     <div class="pg-title">डॉ. प्रणव एवं डॉ. गौरव इमेजिंग, आगरा</div>
@@ -244,22 +257,21 @@ st.markdown(
 # TOP PATIENT ROW
 c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 2, 3], vertical_alignment="bottom")
 with c1:
-    p_name = st.text_input("Name", key="p_name")
+    p_name = st.text_input("Name", key="p_name_input")
 with c2:
-    p_age = st.text_input("Age (years)", key="p_age")
+    p_age = st.text_input("Age (years)", key="p_age_input")
 with c3:
-    p_sex = st.radio("Sex", ["F", "M"], horizontal=True, key="p_sex")
+    p_sex = st.radio("Sex", ["F", "M"], horizontal=True, key="p_sex_input")
 with c4:
-    p_date = st.text_input("Date", value=datetime.now().strftime("%d-%b-%y"), key="p_date")
+    p_date = st.text_input("Date", value=datetime.now().strftime("%d-%b-%y"), key="p_date_input")
 with c5:
-    p_ref = st.text_input("Referred by", key="p_ref")
+    p_ref = st.text_input("Referred by", key="p_ref_input")
 
 st.markdown("---")
 
 # Setup Layout: Left (Inputs) and Right (Preview)
 col_input, col_preview = st.columns([1, 1], gap="large")
 
-# 1. Template Selector (Top of left column)
 with col_input:
     template_id = st.selectbox(
         "⚡ Load a Clinical Template",
@@ -268,7 +280,7 @@ with col_input:
     )
     st.caption("Select a template to fill typical findings.")
 
-# Initialize data dictionary to store our values
+# Initialize data dictionary
 data = {
     "patient_name": p_name,
     "patient_age": p_age,
@@ -276,17 +288,13 @@ data = {
     "referred_by": p_ref,
 }
 
-# 2. Build the Input Form on the Left
 with col_input:
     st.subheader("Findings")
-    
-    # LMP is usually its own block
     data["lmp"] = st.text_input("LMP", key="p_lmp")
     
-    # Loop through the blocks defined for this specific template
     for block_name in TEMPLATE_BLOCKS[template_id]:
         if block_name in ("HEADER", "LMP"):
-            continue # Already handled above
+            continue
         
         with st.expander(block_name.replace("_", " ").title(), expanded=True):
             cols = st.columns(2)
@@ -298,8 +306,6 @@ with col_input:
                 with cols[i % 2]:
                     ftype = field["type"]
                     label = field["label"]
-                    
-                    # Use session state keys to persist values
                     key = f"{template_id}_{field_id}"
                     
                     if ftype == "enum":
@@ -308,22 +314,63 @@ with col_input:
                     else:
                         data[field_id] = st.text_input(label, key=key)
 
-# 3. Render the Live Preview on the Right
+# 3. Render the Live Preview & Editable Impression
 with col_preview:
     st.subheader("📄 Live Preview")
     
-    # Generate the text based on current form state
-    report_text = generate_ob_report(template_id, data)
-    
-    # Render to styled HTML box
-    safe_html = html.escape(report_text).replace("\n", "<br>")
+    findings_text = generate_findings(template_id, data)
+    safe_html = html.escape(findings_text).replace("\n", "<br>")
     st.markdown(f'<div class="preview-box">{safe_html}</div>', unsafe_allow_html=True)
     
     st.markdown("---")
-    # Add download button
+    
+    # --- EDITABLE IMPRESSION BOX ---
+    st.subheader("✏️ Impression (editable)")
+    st.caption("Edit any line. Auto-updates with findings unless you type here.")
+    
+    auto_imp_str = generate_impression(template_id, data)
+    new_auto_hash = hashlib.md5(auto_imp_str.encode("utf-8")).hexdigest()
+
+    if "_imp_ver" not in st.session_state:
+        st.session_state["_imp_ver"] = 0
+    if "_imp_auto_hash" not in st.session_state:
+        st.session_state["_imp_auto_hash"] = new_auto_hash
+    if "_imp_widget_current" not in st.session_state:
+        st.session_state["_imp_widget_current"] = auto_imp_str
+
+    _user_text_key = f"impression_box_v{st.session_state['_imp_ver']}"
+    _user_text = st.session_state.get(_user_text_key, None)
+
+    _user_has_edited = (
+        _user_text is not None
+        and _user_text != st.session_state["_imp_widget_current"]
+    )
+
+    if (new_auto_hash != st.session_state["_imp_auto_hash"]
+            and not _user_has_edited):
+        st.session_state["_imp_ver"] += 1
+        st.session_state["_imp_auto_hash"] = new_auto_hash
+        st.session_state["_imp_widget_current"] = auto_imp_str
+        _user_text_key = f"impression_box_v{st.session_state['_imp_ver']}"
+
+    if _user_text_key not in st.session_state:
+        st.session_state[_user_text_key] = auto_imp_str
+
+    edited_imp = st.text_area(
+        "Impression lines (one per line)",
+        height=150, label_visibility="collapsed",
+        key=_user_text_key,
+    )
+
+    st.markdown("---")
+    
+    # --- DOWNLOAD BUTTON ---
+    # Combine findings and impression for the final text
+    final_report_text = f"{findings_text}\n\nIMPRESSION:\n{edited_imp}"
+    
     st.download_button(
-        label="⬇️ Download .docx",
-        data=report_text,
+        label="⬇️ Download Report (TXT)",
+        data=final_report_text,
         file_name=f"OB_Report_{p_name or 'Unknown'}.txt",
         mime="text/plain"
     )
