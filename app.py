@@ -113,33 +113,148 @@ def generate_ob_report(template_id, data):
     return "\n".join(out)
 
 # ============================================================
-# STREAMLIT UI
+# STREAMLIT UI & CSS
 # ============================================================
 
-st.set_page_config(page_title="OB Reporting App", layout="wide")
+st.set_page_config(page_title="डॉ. प्रणव एवं डॉ. गौरव इमेजिंग, आगरा", layout="wide")
 
-st.markdown("""
+# EXACT CSS FROM RADIOLOGY APP
+st.markdown(
+    """
     <style>
-    .preview-box {
-        background-color: #2a2a2a !important;
-        color: #ffffff !important;
-        font-family: Consolas, Menlo, 'Courier New', monospace !important;
-        font-size: 13px !important;
-        line-height: 1.6 !important;
-        padding: 16px !important;
-        border-radius: 8px !important;
-        white-space: pre-wrap !important;
+    :root, html, body {
+        color-scheme: light !important;
+        background-color: #f4f6f9 !important;
     }
+    #MainMenu {visibility: hidden;}
+    header[data-testid="stHeader"] {visibility: hidden; height: 0;}
+    footer {visibility: hidden;}
+    [data-testid="stToolbar"] {visibility: hidden;}
+    .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stAppViewContainer"] > .main,
+    section.main,
+    .main .block-container {
+        background-color: #f4f6f9 !important;
+    }
+    .stApp, .stApp p, .stApp label, .stApp span, .stApp div,
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+    .stApp li, .stApp small, .stApp strong, .stApp em {
+        color: #111111 !important;
+    }
+    .pg-title {
+        text-align: center; margin: 0 0 0.15rem 0; padding: 0;
+        color: #1F4E79 !important; font-weight: 700; font-size: 2rem;
+        letter-spacing: 0.5px;
+    }
+    .pg-tagline {
+        text-align: center; margin: 0 0 1.0rem 0; padding: 0;
+        color: #555 !important; font-style: italic; font-size: 1.05rem;
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+        display: flex !important; flex-direction: column !important;
+        justify-content: flex-end !important;
+    }
+    div[data-testid="stRadio"] label,
+    div[data-testid="stCheckbox"] label { cursor: pointer !important; }
     div[data-testid="stExpander"] {
         background-color: #ffffff !important;
         border: 1px solid #cfd6dd !important;
         border-radius: 6px !important;
+        margin-bottom: 4px !important;
+    }
+    div[data-testid="stExpander"] details,
+    div[data-testid="stExpander"] details > div {
+        background-color: #ffffff !important;
+    }
+    div[data-testid="stExpander"] details > summary {
+        padding: 8px 12px !important; min-height: 42px !important;
+        box-sizing: border-box !important; display: flex !important;
+        align-items: center !important;
+        background-color: #ffffff !important;
+    }
+    div[data-testid="stExpander"] details[open] > summary {
+        background-color: #eef2f7 !important;
+        border-bottom: 1px solid #cfd6dd !important;
+    }
+    div[data-testid="stExpander"] summary,
+    div[data-testid="stExpander"] summary * {
+        color: #111111 !important; font-weight: 600 !important;
+        font-size: 14px !important;
+        white-space: nowrap !important; overflow: hidden !important;
+        text-overflow: ellipsis !important;
+    }
+    .stTextInput input,
+    .stTextArea textarea,
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stTextArea"] textarea,
+    [data-baseweb="input"] input,
+    [data-baseweb="base-input"] input,
+    [data-baseweb="textarea"] textarea,
+    div[data-baseweb="select"] > div {
+        background-color: #ffffff !important;
+        color: #111111 !important;
+        border: 1px solid #cfd6dd !important;
+        min-height: 42px !important;
+        box-sizing: border-box !important;
+    }
+    .stButton button {
+        background-color: #ffffff !important;
+        color: #111111 !important;
+        border: 1px solid #cfd6dd !important;
+    }
+    .stButton button:hover {
+        background-color: #eef2f7 !important;
+        border-color: #305496 !important;
+    }
+    .preview-box,
+    .stApp .preview-box,
+    .stApp .preview-box * {
+        color: #ffffff !important;
+    }
+    .preview-box {
+        background-color: #2a2a2a !important;
+        font-family: Consolas, Menlo, 'Courier New', monospace !important;
+        font-size: 12.5px !important;
+        line-height: 1.5 !important;
+        padding: 14px 16px !important;
+        border-radius: 8px !important;
+        border: 1px solid #333 !important;
+        white-space: pre-wrap !important;
+        word-wrap: break-word !important;
+        overflow-wrap: anywhere !important;
+        word-break: break-word !important;
         margin-bottom: 8px !important;
+        display: block !important;
     }
     </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
-st.title("OB Reporting App")
+# HEADER
+st.markdown(
+    """
+    <div class="pg-title">डॉ. प्रणव एवं डॉ. गौरव इमेजिंग, आगरा</div>
+    <div class="pg-tagline">Precision Imaging. Trusted Diagnostics. Agra.</div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# TOP PATIENT ROW
+c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 2, 3], vertical_alignment="bottom")
+with c1:
+    p_name = st.text_input("Name", key="p_name")
+with c2:
+    p_age = st.text_input("Age (years)", key="p_age")
+with c3:
+    p_sex = st.radio("Sex", ["F", "M"], horizontal=True, key="p_sex")
+with c4:
+    p_date = st.text_input("Date", value=datetime.now().strftime("%d-%b-%y"), key="p_date")
+with c5:
+    p_ref = st.text_input("Referred by", key="p_ref")
+
+st.markdown("---")
 
 # Setup Layout: Left (Inputs) and Right (Preview)
 col_input, col_preview = st.columns([1, 1], gap="large")
@@ -147,26 +262,27 @@ col_input, col_preview = st.columns([1, 1], gap="large")
 # 1. Template Selector (Top of left column)
 with col_input:
     template_id = st.selectbox(
-        "Report Template",
+        "⚡ Load a Clinical Template",
         options=list(TEMPLATES.keys()),
         format_func=lambda k: TEMPLATES[k],
     )
-    st.markdown("---")
+    st.caption("Select a template to fill typical findings.")
 
 # Initialize data dictionary to store our values
-data = {}
+data = {
+    "patient_name": p_name,
+    "patient_age": p_age,
+    "report_date": p_date,
+    "referred_by": p_ref,
+}
 
 # 2. Build the Input Form on the Left
 with col_input:
-    st.subheader("Patient Details")
-    for field_id in BLOCKS["HEADER"] + BLOCKS["LMP"]:
-        field = FIELD_BY_ID[field_id]
-        if field["type"] == "date":
-            data[field_id] = st.text_input(field["label"], value=datetime.now().strftime("%d-%b-%y"))
-        else:
-            data[field_id] = st.text_input(field["label"])
-
     st.subheader("Findings")
+    
+    # LMP is usually its own block
+    data["lmp"] = st.text_input("LMP", key="p_lmp")
+    
     # Loop through the blocks defined for this specific template
     for block_name in TEMPLATE_BLOCKS[template_id]:
         if block_name in ("HEADER", "LMP"):
@@ -206,8 +322,8 @@ with col_preview:
     st.markdown("---")
     # Add download button
     st.download_button(
-        label="⬇️ Download Report (TXT)",
+        label="⬇️ Download .docx",
         data=report_text,
-        file_name=f"OB_Report_{data.get('patient_name', 'Unknown')}.txt",
+        file_name=f"OB_Report_{p_name or 'Unknown'}.txt",
         mime="text/plain"
     )
