@@ -1,5 +1,6 @@
 import streamlit as st
 import io
+import html
 from datetime import datetime
 
 from docx import Document
@@ -368,6 +369,200 @@ def build_docx_bytes(data, template_id):
     return buf.getvalue()
 
 # ============================================================
+# LIVE PREVIEW RENDERER
+# ============================================================
+
+def render_ob_preview(data, template_id):
+    """Return a plain-text rendering of the report in the same order
+    as the DOCX builder. Used for the live preview box only."""
+    lines = []
+
+    # --- 1. Demographics ---
+    lines.append(f"NAME :- {data.get('patient_name', '')}        "
+                 f"DATE :- {data.get('report_date', '')}")
+    lines.append(f"AGE/SEX :- {data.get('patient_age', '')}Y/ "
+                 f"{data.get('p_sex', 'F')}        "
+                 f"REF. BY:- {data.get('referred_by', '')}")
+    lines.append("")
+
+    # --- 2. Title & LMP ---
+    lines.append("         ULTRASOUND OBSTETRICS REPORT")
+    lines.append("")
+    lines.append(f"LMP- {data.get('lmp', '')}")
+    lines.append("")
+
+    # --- 3. EARLY_OBS path ---
+    if template_id == "EARLY_OBS":
+        subchorionic = "Absent"
+        if data.get("subchorionic_present"):
+            subchorionic = f"Present; {data.get('subchorionic_grade', 'Grade-I')}"
+
+        corpus = "Not Appreciated"
+        if data.get("corpus_present"):
+            side = data.get("corpus_side", "Right")
+            size = data.get("corpus_size", "")
+            corpus = f"Appreciated; {size}mm in {side} Ovary"
+
+        if data.get('cardiac_status') == "Present":
+            cardiac = f"Present, {data.get('fhr_val', '')} bpm"
+        else:
+            cardiac = data.get('cardiac_status')
+
+        early_rows = [
+            ("G-Sac", data.get('gsac', 'Seen')),
+            ("CRL", data.get('crl', '')),
+            ("Yolk sac", data.get('yolk', 'Not Seen')),
+            ("Cardiac pulsations", cardiac),
+            ("Decidual reaction", "Present"),
+            ("Subchorionic collection", subchorionic),
+            ("Corpus leuteal cyst", corpus),
+            ("Cervix", data.get('cervix', 'Normal')),
+            ("Internal Os", "Closed"),
+            ("Placenta", "-"),
+        ]
+        for label, val in early_rows:
+            lines.append(f"  {label:<28}: {val}")
+        lines.append("")
+
+        lines.append(
+            f"  {'EDD (LMP)':<20}: "
+            f"{data.get('edd_lmp', '') if data.get('lmp') != 'Not Sure' else '-'}"
+            f"    ±2W"
+        )
+        lines.append(
+            f"  {'EDD (CUA)':<20}: {data.get('edd_cua', '')}    ±2W"
+        )
+
+    # --- 4. Standard path (T16 / T3) ---
+    else:
+        lines.append(
+            f"Uterus shows single live fetus. Fetus is in "
+            f"{data.get('presentation', 'variable').lower()} presentation "
+            f"at the time of scanning. Fetal movements are present. "
+            f"Fetal cardiac pulsations are appreciated."
+        )
+        lines.append("")
+
+        lines.append("BIO PHYSICAL PARAMETERS:")
+        for param in ["bpd", "hc", "ac", "fl", "hl"]:
+            size = data.get(f"{param}_size", "")
+            wks = data.get(f"{param}_wks", "")
+            dys = data.get(f"{param}_dys", "")
+            lines.append(
+                f"  {param.upper():<4}: "
+                f"{(str(size) + 'mm') if size else '':<10} "
+                f"{(str(wks) + 'weeks') if wks else '':<12} "
+                f"{(str(dys) + 'days±2w') if dys else ''}"
+            )
+        lines.append("")
+
+        lines.append(
+            f"FL/HC= {data.get('fl_hc', '')}        "
+            f"HC/AC = {data.get('hc_ac', '')} (BOTH WNL)"
+        )
+        lines.append("")
+
+        lines.append(f"MEAN AGE : {data.get('mean_age', '')}")
+        lines.append(f"FETAL WEIGHT : {data.get('fetal_weight', '')}")
+
+        # AFI (same logic as DOCX)
+        afi_method = data.get('afi_method', 'Total 4 Quadrants')
+        if afi_method == "Total 4 Quadrants":
+            afi_val = data.get('afi_total', '')
+            desc, _is_abn = generate_afi_text(afi_val)
+            if desc == "Nil, Not a single pocket of even one cm seen":
+                afi_str = desc
+            else:
+                afi_str = (f"{desc}, total of four quadrants measures "
+                           f"{afi_val} cm")
+        else:
+            afi_val = data.get('afi_pocket', '')
+            desc, _is_abn = generate_afi_text(afi_val)
+            afi_str = f"{desc}, largest pocket measures {afi_val} cm"
+        lines.append(f"AFI:- {afi_str}")
+
+        lines.append(f"Foetal heart rate is approx. {data.get('fhr', '')}.")
+        lines.append("")
+
+        lines.append(
+            f"  {'EDD (LMP)--':<18}: "
+            f"{data.get('edd_lmp', '') if data.get('lmp') != 'Not Sure' else '-'}"
+            f"    ±2W"
+        )
+        lines.append(
+            f"  {'EDD (CUA)--':<18}: {data.get('edd_cua', '')}    ±2W"
+        )
+        lines.append("")
+
+        # Placenta
+        plac_pos = data.get('placenta_pos', 'ANTERIOR')
+        plac_os = data.get('placenta_os', 'away from the Os')
+        if plac_os == "Placenta Praevia":
+            plac_str = (f"is {plac_pos} and Placenta Praevia "
+                        f"({data.get('praevia_grade', 'Grade I')}).")
+        elif plac_os == "Low-lying":
+            dist = data.get('placenta_dist', '')
+            if dist.strip():
+                plac_str = (f"is {plac_pos} and Low-lying, about {dist}cm "
+                            f"away from the Internal Os.")
+            else:
+                plac_str = (f"is {plac_pos} and Low-lying, but away from "
+                            f"the Internal Os.")
+        else:
+            plac_str = f"is {plac_pos} and {plac_os}."
+        lines.append(f"Placenta {plac_str}")
+
+        lines.append(
+            f"CERVIX- normal ({data.get('cervix', '')}), internal Os is "
+            f"{data.get('internal_os', 'closed').lower()}."
+        )
+
+        if data.get('cord_around') or data.get('cord_straddling'):
+            parts = []
+            if data.get('cord_around'):
+                parts.append("SINGLE LOOP OF CORD AROUND THE NECK.")
+            if data.get('cord_straddling'):
+                parts.append("SINGLE LOOP OF CORD STRADDLING THE NECK.")
+            lines.append(" ".join(parts))
+        else:
+            lines.append("NO LOOP OF CORD SEEN AROUND THE NECK.")
+
+        if template_id == "T3" and data.get('measure_scar'):
+            lines.append(f"Scar Thickness: {data.get('scar_size', '')} mm")
+
+    # --- 5. Impression ---
+    lines.append("")
+    lines.append("IMPRESSION:")
+    mean_age = data.get('mean_age', '')
+    if template_id == "EARLY_OBS":
+        if data.get('cardiac_status') == "Blighted Ovum":
+            imp_text = (f"INTRA UTERINE EMPTY GESTATIONAL SAC OF "
+                        f"{data.get('ga_crl', '')} +/-1w WITH NO APPRECIABLE "
+                        f"FETAL POLE OR YOLK SAC - LIKELY EARLY PREGNANCY "
+                        f"FAILURE (BLIGHTED OVUM).")
+        elif data.get('cardiac_status') == "Not yet appreciable":
+            imp_text = (f"Intra uterine pregnancy of {data.get('ga_crl', '')} "
+                        f"+/-1w with not yet appreciable cardiac activity. "
+                        f"Adv- Review scan after 2 weeks.")
+        else:
+            imp_text = (f"Intra uterine live pregnancy of "
+                        f"{data.get('ga_crl', '')} +/-1w with good cardiac "
+                        f"activity.")
+    else:
+        imp_text = (f"Ultrasound obstetric reveals single live intrauterine "
+                    f"fetus in {data.get('presentation', 'variable').lower()} "
+                    f"presentation of approx. {mean_age} gestation age.")
+    lines.append(f"  - {imp_text}")
+
+    # --- 6. Disclaimer (short) ---
+    lines.append("")
+    lines.append("PNDT DISCLAIMER: The radiologist has not conducted or "
+                 "caused to conduct any pre-natal diagnostic technique for "
+                 "the purpose of determining fetal sex.")
+
+    return "\n".join(lines)
+
+# ============================================================
 # STREAMLIT UI
 # ============================================================
 st.set_page_config(page_title="OB Reporting Software", layout="wide")
@@ -400,7 +595,7 @@ st.markdown(
         color: #111111 !important;
     }
 
-    /* === OB header (kept from original OB app) === */
+    /* === OB header === */
     .clinic-title {
         text-align: center; color: #1F4E79 !important;
         font-weight: 700; font-size: 2rem;
@@ -412,7 +607,7 @@ st.markdown(
         margin-top: 0; padding-top: 0; margin-bottom: 1.5rem;
     }
 
-    /* === DICOM info box (kept from original OB app) === */
+    /* === DICOM info box === */
     .dicom-box {
         background-color: #f0f5fa !important;
         border: 1px solid #b0c4de !important;
@@ -511,153 +706,4 @@ st.markdown(
     /* === Buttons === */
     .stButton button,
     .stDownloadButton button,
-    div[data-testid="stButton"] button,
-    div[data-testid="stDownloadButton"] button {
-        background-color: #ffffff !important;
-        color: #111111 !important;
-        border: 1px solid #cfd6dd !important;
-    }
-    .stButton button:hover,
-    .stDownloadButton button:hover {
-        background-color: #eef2f7 !important;
-        border-color: #305496 !important;
-    }
-
-    /* === Alerts / captions / hr === */
-    div[data-testid="stAlert"] {
-        background-color: #ffffff !important;
-        color: #111111 !important;
-    }
-    div[data-testid="stCaptionContainer"],
-    div[data-testid="stCaptionContainer"] * {
-        color: #555555 !important;
-    }
-    hr { border-color: #cfd6dd !important; }
-    div[data-testid="stMarkdownContainer"] * {
-        color: #111111;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.markdown('<div class="clinic-title">डॉ. प्रणव एवं डॉ. गौरव इमेजिंग, आगरा</div>', unsafe_allow_html=True)
-st.markdown('<div class="clinic-sub">Precision Imaging. Trusted Diagnostics. Agra.</div>', unsafe_allow_html=True)
-
-# Patient Demographics Top Bar
-c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 2, 3])
-with c1: p_name = st.text_input("Name")
-with c2: p_age = st.text_input("Age")
-with c3: p_sex = st.radio("Sex", ["F", "M"], horizontal=True)
-with c4: p_date = st.text_input("Date", value=datetime.now().strftime("%d-%b-%y"))
-with c5: p_ref = st.text_input("Referred by")
-
-data = {"patient_name": p_name, "patient_age": p_age, "report_date": p_date, "referred_by": p_ref, "p_sex": p_sex}
-
-col1, col2 = st.columns([1, 1], gap="large")
-
-with col1:
-    template_id = st.selectbox("Template", ["EARLY_OBS", "T16", "T3"])
-    
-    # LMP Logic
-    lmp_not_sure = st.checkbox("LMP Not Sure / Not Known")
-    data["lmp"] = "Not Sure" if lmp_not_sure else st.text_input("LMP")
-
-    # ==========================================
-    # DICOM ACCORDION (Machine Data)
-    # ==========================================
-    with st.expander("🔗 DICOM SR Data (Machine Generated)", expanded=False):
-        st.markdown('<div class="dicom-box">Verify or override data received from the ultrasound machine.</div>', unsafe_allow_html=True)
-        if template_id == "EARLY_OBS":
-            data["gsac"] = st.text_input("G-Sac", value="Seen")
-            data["crl"] = st.text_input("CRL", value="")
-            data["ga_crl"] = st.text_input("GA by CRL", value="")
-            data["yolk"] = st.text_input("Yolk sac", value="")
-            data["edd_lmp"] = st.text_input("EDD (LMP)", value="")
-            data["edd_cua"] = st.text_input("EDD (CUA)", value="")
-        else:
-            for param in ["bpd", "hc", "ac", "fl", "hl"]:
-                b1, b2, b3 = st.columns(3)
-                data[f"{param}_size"] = b1.text_input(f"{param.upper()} Size")
-                data[f"{param}_wks"] = b2.text_input(f"{param.upper()} Wks")
-                data[f"{param}_dys"] = b3.text_input(f"{param.upper()} Days")
-            
-            b1, b2 = st.columns(2)
-            data["fl_hc"] = b1.text_input("FL/HC")
-            data["hc_ac"] = b2.text_input("HC/AC")
-            
-            b1, b2 = st.columns(2)
-            data["mean_age"] = b1.text_input("Mean Age")
-            data["fetal_weight"] = b2.text_input("Fetal Weight (g)")
-            
-            b1, b2 = st.columns(2)
-            data["fhr"] = b1.text_input("FHR")
-            data["edd_lmp"] = b2.text_input("EDD (LMP)")
-            data["edd_cua"] = st.text_input("EDD (CUA)")
-
-    # ==========================================
-    # MANUAL ENTRY (Typist Data)
-    # ==========================================
-    if template_id == "EARLY_OBS":
-        with st.expander("Early OBS Details", expanded=True):
-            data["cardiac_status"] = st.selectbox("Cardiac Activity", ["Present", "Not yet appreciable", "Blighted Ovum"])
-            if data["cardiac_status"] == "Present":
-                data["fhr_val"] = st.text_input("FHR Value (bpm)")
-            
-            data["cervix"] = st.text_input("Cervix Length", value="Normal")
-            
-            data["subchorionic_present"] = st.checkbox("Subchorionic collection present")
-            if data["subchorionic_present"]:
-                data["subchorionic_grade"] = st.radio("Grade", ["Grade-I", "Grade-I/II", "Grade-II", "Grade-II/III"], horizontal=True)
-            
-            data["corpus_present"] = st.checkbox("Corpus Luteum Cyst present")
-            if data["corpus_present"]:
-                b1, b2 = st.columns(2)
-                data["corpus_side"] = b1.selectbox("Side", ["Right", "Left"])
-                data["corpus_size"] = b2.text_input("Size (mm)")
-
-    else:
-        with st.expander("Anatomy & Presentation", expanded=True):
-            b1, b2 = st.columns(2)
-            data["presentation"] = b1.selectbox("Presentation", ["VARIABLE", "CEPHALIC", "BREECH"])
-            data["lie"] = b2.selectbox("Lie", ["None", "LOA", "ROA", "LOP", "ROP"])
-            
-            # AFI Logic
-            data["afi_method"] = st.radio("AFI Method", ["Largest Pocket", "Total 4 Quadrants"], horizontal=True)
-            if data["afi_method"] == "Total 4 Quadrants":
-                data["afi_total"] = st.text_input("AFI (cm)")
-            else:
-                data["afi_pocket"] = st.text_input("Largest Pocket (cm)")
-            
-            b1, b2 = st.columns(2)
-            data["placenta_pos"] = b1.selectbox("Placenta Position", ["ANTERIOR", "POSTERIOR", "FUNDAL", "LOW-LYING"])
-            data["placenta_os"] = b2.selectbox("Placenta Relation to Os", ["away from the Os", "Low-lying", "Placenta Praevia"])
-            
-            if data["placenta_os"] == "Low-lying":
-                data["placenta_dist"] = st.text_input("Distance from Internal Os (cm) [Optional]")
-            elif data["placenta_os"] == "Placenta Praevia":
-                data["praevia_grade"] = st.radio("Praevia Grade", ["Grade I", "Grade II", "Grade III", "Grade IV"], horizontal=True)
-            
-            b1, b2 = st.columns(2)
-            data["cervix"] = b1.text_input("Cervix Length")
-            data["internal_os"] = b2.selectbox("Internal Os", ["Closed", "Open"])
-            
-            st.markdown("**Cord Loop**")
-            data["cord_around"] = st.checkbox("Single loop of cord around the neck")
-            data["cord_straddling"] = st.checkbox("Single loop of cord straddling the neck")
-            
-            if template_id == "T3":
-                st.markdown("**Scar Thickness**")
-                data["measure_scar"] = st.checkbox("Measure Scar Thickness")
-                if data["measure_scar"]:
-                    data["scar_size"] = st.text_input("Scar Size (mm)")
-
-with col2:
-    st.subheader("⬇️ Download Report")
-    docx_bytes = build_docx_bytes(data, template_id)
-    st.download_button(
-        label="Download Word Document",
-        data=docx_bytes,
-        file_name=f"OB_Report_{p_name or 'Unknown'}.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
+    div[data-testid="st
