@@ -10,7 +10,7 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
 # ============================================================
-# DOCX HELPERS (Exact Border & Alignment Control)
+# DOCX HELPERS
 # ============================================================
 
 def set_cell_border(cell, **kwargs):
@@ -33,7 +33,6 @@ def set_cell_border(cell, **kwargs):
                     element.set(qn('w:{}'.format(key)), str(edge_data[key]))
 
 def set_table_borders(table):
-    # FIX: Accessing the internal _tbl property instead of table.tblPr
     tbl = table._tbl
     tblPr = tbl.tblPr
     borders = OxmlElement("w:tblBorders")
@@ -55,6 +54,30 @@ def add_run(paragraph, text, bold=False, italic=False, size=11, underline=False,
     if color is not None:
         run.font.color.rgb = color
     return run
+
+def generate_afi_text(afi_val):
+    """Smart logic for AFI descriptive text based on clinical values."""
+    try:
+        val = float(afi_val)
+    except (ValueError, TypeError):
+        return "Adequate", False  # Default if blank or invalid
+
+    if val == 0:
+        return "Nil, Not a single pocket of even one cm seen", True
+    elif 0 < val < 4:
+        return "Moderate to severe oligohydramnios", True
+    elif 4 <= val < 6:
+        return "Mild to moderate oligohydramnios", True
+    elif 6 <= val < 8:
+        return "Mild oligohydramnios", True
+    elif 8 <= val < 10:
+        return "On the lower side", True
+    elif 10 <= val <= 20:
+        return "Adequate", False
+    elif 20 < val < 25:
+        return "On the higher side", True
+    else: # >= 25
+        return "Polyhydramnios", True
 
 # ============================================================
 # DOCX BUILDER
@@ -98,7 +121,10 @@ def build_docx_bytes(data, template_id):
     add_run(title_p, "ULTRASOUND OBSTETRICS REPORT", bold=True, underline=True, size=14, color=RGBColor(0x1F, 0x4E, 0x79))
 
     lmp_p = doc.add_paragraph()
-    add_run(lmp_p, f"LMP- {data.get('lmp', '')}", bold=True)
+    if data.get('lmp') == "Not Sure":
+        add_run(lmp_p, f"LMP- {data.get('lmp', '')}", bold=False, italic=True)
+    else:
+        add_run(lmp_p, f"LMP- {data.get('lmp', '')}", bold=True)
     doc.add_paragraph()
 
     # --- 3. EARLY OBS SPECIFIC FORMAT ---
@@ -162,8 +188,8 @@ def build_docx_bytes(data, template_id):
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         add_run(p, f"Uterus shows single live fetus. Fetus is in ")
-        # FIX: Forced .upper() here
-        add_run(p, f"{data.get('presentation', 'VARIABLE').upper()} PRESENTATION", bold=True, italic=True)
+        # Lowercase bold italic for presentation
+        add_run(p, f"{data.get('presentation', 'variable').lower()} presentation", bold=True, italic=True)
         add_run(p, f" at the time of scanning. Fetal movements are present. Fetal cardiac pulsations are appreciated.")
         
         doc.add_paragraph()
@@ -194,12 +220,24 @@ def build_docx_bytes(data, template_id):
 
         doc.add_paragraph()
         
-        p = doc.add_paragraph()
-        add_run(p, "FL/HC= ", bold=True)
-        add_run(p, f"{data.get('fl_hc', '')} ; ", italic=True)
-        add_run(p, "HC/AC = ", bold=True)
-        add_run(p, f"{data.get('hc_ac', '')} (BOTH WNL)", italic=True)
+        # --- RATIO TABLE (For Alignment) ---
+        ratio_table = doc.add_table(rows=1, cols=2)
+        ratio_table.alignment = WD_TABLE_ALIGNMENT.LEFT
+        
+        # Set widths to match the Biometry table's first 2 columns
+        ratio_table.columns[0].width = Cm(7.5)
+        ratio_table.columns[1].width = Cm(8.5)
 
+        p1 = ratio_table.cell(0, 0).paragraphs[0]
+        add_run(p1, "FL/HC= ", bold=True)
+        add_run(p1, f"{data.get('fl_hc', '')}", italic=True)
+
+        p2 = ratio_table.cell(0, 1).paragraphs[0]
+        add_run(p2, "HC/AC = ", bold=True)
+        add_run(p2, f"{data.get('hc_ac', '')} (BOTH WNL)", italic=True)
+
+        doc.add_paragraph()
+        
         p = doc.add_paragraph()
         add_run(p, "MEAN AGE : ", bold=True)
         add_run(p, f"{data.get('mean_age', '')}", italic=True)
@@ -208,10 +246,27 @@ def build_docx_bytes(data, template_id):
         add_run(p, "FETAL WEIGHT : ", bold=True)
         add_run(p, f"{data.get('fetal_weight', '')}", italic=True)
 
+        # --- AFI SMART LOGIC ---
         p = doc.add_paragraph()
         add_run(p, "AFI:- ", bold=True)
-        afi_text = f"Adequate, AFI = {data.get('afi_total', '')} cm" if data.get('afi_method') == "Total 4 Quadrants" else f"Adequate, Largest pocket measures {data.get('afi_pocket', '')} cm"
-        add_run(p, afi_text, italic=True)
+        
+        afi_method = data.get('afi_method', 'Total 4 Quadrants')
+        if afi_method == "Total 4 Quadrants":
+            afi_val = data.get('afi_total', '')
+            desc, is_abnormal = generate_afi_text(afi_val)
+            if desc == "Nil, Not a single pocket of even one cm seen":
+                afi_str = desc
+            else:
+                afi_str = f"{desc}, total of four quadrants measures {afi_val} cm"
+        else:
+            afi_val = data.get('afi_pocket', '')
+            desc, is_abnormal = generate_afi_text(afi_val)
+            afi_str = f"{desc}, largest pocket measures {afi_val} cm"
+
+        if is_abnormal:
+            add_run(p, afi_str, bold=True, italic=True)
+        else:
+            add_run(p, afi_str, italic=False)
 
         p = doc.add_paragraph()
         add_run(p, "Foetal heart rate ", bold=True)
@@ -237,14 +292,25 @@ def build_docx_bytes(data, template_id):
 
         doc.add_paragraph()
         
+        # --- PLACENTA LOGIC ---
         p = doc.add_paragraph()
         add_run(p, "Placenta ", bold=True)
         
         plac_pos = data.get('placenta_pos', 'ANTERIOR')
         plac_os = data.get('placenta_os', 'away from the Os')
+        
         if plac_os == "Placenta Praevia":
-            plac_os = f"Placenta Praevia ({data.get('praevia_grade', 'Grade I')})"
-        add_run(p, f"is {plac_pos} and {plac_os}.")
+            plac_str = f"is {plac_pos} and Placenta Praevia ({data.get('praevia_grade', 'Grade I')})."
+        elif plac_os == "Low-lying":
+            dist = data.get('placenta_dist', '')
+            if dist.strip():
+                plac_str = f"is {plac_pos} and Low-lying, about {dist}cm away from the Internal Os."
+            else:
+                plac_str = f"is {plac_pos} and Low-lying, but away from the Internal Os."
+        else:
+            plac_str = f"is {plac_pos} and {plac_os}."
+            
+        add_run(p, plac_str)
 
         p = doc.add_paragraph()
         add_run(p, "CERVIX- ", bold=True)
@@ -302,7 +368,7 @@ def build_docx_bytes(data, template_id):
     return buf.getvalue()
 
 # ============================================================
-# STREAMLIT UI (THE NEW CLEAN INTERFACE)
+# STREAMLIT UI
 # ============================================================
 st.set_page_config(page_title="OB Reporting Software", layout="wide")
 
@@ -406,7 +472,10 @@ with col1:
             b1, b2 = st.columns(2)
             data["placenta_pos"] = b1.selectbox("Placenta Position", ["ANTERIOR", "POSTERIOR", "FUNDAL", "LOW-LYING"])
             data["placenta_os"] = b2.selectbox("Placenta Relation to Os", ["away from the Os", "Low-lying", "Placenta Praevia"])
-            if data["placenta_os"] == "Placenta Praevia":
+            
+            if data["placenta_os"] == "Low-lying":
+                data["placenta_dist"] = st.text_input("Distance from Internal Os (cm) [Optional]")
+            elif data["placenta_os"] == "Placenta Praevia":
                 data["praevia_grade"] = st.radio("Praevia Grade", ["Grade I", "Grade II", "Grade III", "Grade IV"], horizontal=True)
             
             b1, b2 = st.columns(2)
