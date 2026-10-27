@@ -33,8 +33,9 @@ def set_cell_border(cell, **kwargs):
                     element.set(qn('w:{}'.format(key)), str(edge_data[key]))
 
 def set_table_borders(table):
+    # FIX: Accessing the internal _tbl property instead of table.tblPr
     tbl = table._tbl
-    tblPr = table.tblPr
+    tblPr = tbl.tblPr
     borders = OxmlElement("w:tblBorders")
     for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
         e = OxmlElement(f"w:{edge}")
@@ -109,19 +110,16 @@ def build_docx_bytes(data, template_id):
             row.cells[0].width = Cm(5.5)
             row.cells[1].width = Cm(11.5)
 
-        # Dynamic logic for Subchorionic Collection
         subchorionic = "Absent"
         if data.get("subchorionic_present"):
             subchorionic = f"Present; {data.get('subchorionic_grade', 'Grade-I')}"
 
-        # Dynamic logic for Corpus Luteum
         corpus = "Not Appreciated"
         if data.get("corpus_present"):
             side = data.get("corpus_side", "Right")
             size = data.get("corpus_size", "")
             corpus = f"Appreciated; {size}mm in {side} Ovary"
 
-        # Dynamic logic for Cardiac Activity
         cardiac = f"Present, {data.get('fhr_val', '')} bpm" if data.get('cardiac_status') == "Present" else data.get('cardiac_status')
 
         early_data = [
@@ -143,7 +141,6 @@ def build_docx_bytes(data, template_id):
 
         doc.add_paragraph()
 
-        # EDD Table
         edd_table = doc.add_table(rows=2, cols=3)
         set_table_borders(edd_table)
         for row in edd_table.rows:
@@ -165,7 +162,8 @@ def build_docx_bytes(data, template_id):
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         add_run(p, f"Uterus shows single live fetus. Fetus is in ")
-        add_run(p, f"{data.get('presentation', 'VARIABLE')} PRESENTATION", bold=True, italic=True)
+        # FIX: Forced .upper() here
+        add_run(p, f"{data.get('presentation', 'VARIABLE').upper()} PRESENTATION", bold=True, italic=True)
         add_run(p, f" at the time of scanning. Fetal movements are present. Fetal cardiac pulsations are appreciated.")
         
         doc.add_paragraph()
@@ -212,7 +210,7 @@ def build_docx_bytes(data, template_id):
 
         p = doc.add_paragraph()
         add_run(p, "AFI:- ", bold=True)
-        afi_text = f"Adequate, AFI = {data.get('afi_total', '')} cm" if data.get('afi_method') == "Total" else f"Adequate, Largest pocket measures {data.get('afi_pocket', '')} cm"
+        afi_text = f"Adequate, AFI = {data.get('afi_total', '')} cm" if data.get('afi_method') == "Total 4 Quadrants" else f"Adequate, Largest pocket measures {data.get('afi_pocket', '')} cm"
         add_run(p, afi_text, italic=True)
 
         p = doc.add_paragraph()
@@ -242,7 +240,6 @@ def build_docx_bytes(data, template_id):
         p = doc.add_paragraph()
         add_run(p, "Placenta ", bold=True)
         
-        # Dynamic Placenta Logic
         plac_pos = data.get('placenta_pos', 'ANTERIOR')
         plac_os = data.get('placenta_os', 'away from the Os')
         if plac_os == "Placenta Praevia":
