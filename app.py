@@ -3,7 +3,7 @@ import io
 from datetime import datetime
 
 from docx import Document
-from docx.shared import Pt, Cm, RGBColor, Inches
+from docx.shared import Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
@@ -14,7 +14,6 @@ from docx.oxml import OxmlElement
 # ============================================================
 
 def set_cell_border(cell, **kwargs):
-    """Sets exact black borders on a single cell."""
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
     tcBorders = tcPr.first_child_found_in("w:tcBorders")
@@ -34,7 +33,6 @@ def set_cell_border(cell, **kwargs):
                     element.set(qn('w:{}'.format(key)), str(edge_data[key]))
 
 def set_table_borders(table):
-    """Sets exact black borders on an entire table."""
     tbl = table._tbl
     tblPr = tbl.tblPr
     borders = OxmlElement("w:tblBorders")
@@ -46,13 +44,16 @@ def set_table_borders(table):
         borders.append(e)
     tblPr.append(borders)
 
-def add_run(paragraph, text, bold=False, italic=False, size=11, underline=False):
+def add_run(paragraph, text, bold=False, italic=False, size=11, underline=False, color=None):
+    """Helper to add text with specific formatting."""
     run = paragraph.add_run(text)
     run.font.name = "Calibri"
     run.font.size = Pt(size)
     run.bold = bold
     run.italic = italic
     run.underline = underline
+    if color is not None:
+        run.font.color.rgb = color
     return run
 
 # ============================================================
@@ -62,7 +63,6 @@ def add_run(paragraph, text, bold=False, italic=False, size=11, underline=False)
 def build_docx_bytes(data, template_id):
     doc = Document()
     section = doc.sections[0]
-    # Standard A4 Margins similar to your docs
     section.page_height = Cm(29.7)
     section.page_width = Cm(21.0)
     section.top_margin = Cm(2.0)
@@ -70,48 +70,36 @@ def build_docx_bytes(data, template_id):
     section.left_margin = Cm(2.0)
     section.right_margin = Cm(2.0)
 
-    # Remove default spacing
     style = doc.styles["Normal"]
     style.font.name = "Calibri"
     style.font.size = Pt(11)
     style.paragraph_format.space_after = Pt(0)
     style.paragraph_format.space_before = Pt(0)
 
-    # --------------------------------------------------------
-    # 1. DEMOGRAPHIC HEADER TABLE (2x2 Grid)
-    # --------------------------------------------------------
+    # --- 1. DEMOGRAPHIC HEADER TABLE (2x2 Grid) ---
     demo_table = doc.add_table(rows=2, cols=2)
     demo_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(demo_table)
     
-    # Set fixed column widths (approx 50/50)
     for row in demo_table.rows:
         row.cells[0].width = Cm(8.5)
         row.cells[1].width = Cm(8.5)
 
-    # Row 0
     cell = demo_table.cell(0, 0)
-    p = cell.paragraphs[0]
-    add_run(p, f"NAME :- {data.get('patient_name', '')}", bold=True)
+    add_run(cell.paragraphs[0], f"NAME :- {data.get('patient_name', '')}", bold=True)
     
     cell = demo_table.cell(0, 1)
-    p = cell.paragraphs[0]
-    add_run(p, f"DATE :- {data.get('report_date', '')}", bold=True)
+    add_run(cell.paragraphs[0], f"DATE :- {data.get('report_date', '')}", bold=True)
 
-    # Row 1
     cell = demo_table.cell(1, 0)
-    p = cell.paragraphs[0]
-    add_run(p, f"AGE/SEX :- {data.get('patient_age', '')}Y/ {data.get('p_sex', 'F')}", bold=True)
+    add_run(cell.paragraphs[0], f"AGE/SEX :- {data.get('patient_age', '')}Y/ {data.get('p_sex', 'F')}", bold=True)
     
     cell = demo_table.cell(1, 1)
-    p = cell.paragraphs[0]
-    add_run(p, f"REF. BY:- {data.get('referred_by', '')}", bold=True)
+    add_run(cell.paragraphs[0], f"REF. BY:- {data.get('referred_by', '')}", bold=True)
 
     doc.add_paragraph().paragraph_format.space_after = Pt(10)
 
-    # --------------------------------------------------------
-    # 2. TITLE & LMP
-    # --------------------------------------------------------
+    # --- 2. TITLE & LMP ---
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     add_run(title_p, "ULTRASOUND OBSTETRICS REPORT", bold=True, underline=True, size=14, color=RGBColor(0x1F, 0x4E, 0x79))
@@ -120,15 +108,11 @@ def build_docx_bytes(data, template_id):
     add_run(lmp_p, f"LMP- {data.get('lmp', '')}", bold=True)
     doc.add_paragraph()
 
-    # --------------------------------------------------------
-    # 3. EARLY OBS SPECIFIC FORMAT
-    # --------------------------------------------------------
+    # --- 3. EARLY OBS SPECIFIC FORMAT ---
     if template_id == "EARLY_OBS":
-        # We build an exact 10-row, 2-column table
         early_table = doc.add_table(rows=10, cols=2)
         set_table_borders(early_table)
         
-        # Widths
         for row in early_table.rows:
             row.cells[0].width = Cm(5.5)
             row.cells[1].width = Cm(11.5)
@@ -150,12 +134,8 @@ def build_docx_bytes(data, template_id):
             cell_l = early_table.cell(i, 0)
             cell_r = early_table.cell(i, 1)
             
-            p = cell_l.paragraphs[0]
-            add_run(p, label, italic=True, size=10)
-            
-            p = cell_r.paragraphs[0]
-            # Data values are typically italicized in the early OBS table
-            add_run(p, val, italic=True, size=10)
+            add_run(cell_l.paragraphs[0], label, italic=True, size=10)
+            add_run(cell_r.paragraphs[0], val, italic=True, size=10)
 
         doc.add_paragraph()
 
@@ -176,11 +156,8 @@ def build_docx_bytes(data, template_id):
             add_run(edd_table.cell(i, 1).paragraphs[0], date, size=10)
             add_run(edd_table.cell(i, 2).paragraphs[0], err, size=10)
 
-    # --------------------------------------------------------
-    # 4. STANDARD OB (16, 22, 36 Weeks) FORMAT
-    # --------------------------------------------------------
+    # --- 4. STANDARD OB (16, 22, 36 Weeks) FORMAT ---
     else:
-        # Intro Paragraph
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         add_run(p, f"Uterus shows single live fetus. Fetus is in ")
@@ -189,7 +166,6 @@ def build_docx_bytes(data, template_id):
         
         doc.add_paragraph()
 
-        # BIO PHYSICAL PARAMETERS Header
         bio_head = doc.add_paragraph()
         add_run(bio_head, "BIO PHYSICAL PARAMETERS:", bold=True, underline=True)
         bio_head.paragraph_format.space_after = Pt(6)
@@ -198,7 +174,6 @@ def build_docx_bytes(data, template_id):
         bio_table = doc.add_table(rows=5, cols=4)
         set_table_borders(bio_table)
         
-        # Set widths (Param, Size, Weeks, Days)
         for row in bio_table.rows:
             row.cells[0].width = Cm(3.5)
             row.cells[1].width = Cm(4.0)
@@ -211,25 +186,13 @@ def build_docx_bytes(data, template_id):
             wks = data.get(f"{param}_wks", "")
             dys = data.get(f"{param}_dys", "")
             
-            # Name
-            p = bio_table.cell(i, 0).paragraphs[0]
-            add_run(p, param.upper(), bold=True, italic=True, size=10)
-            
-            # Size
-            p = bio_table.cell(i, 1).paragraphs[0]
-            add_run(p, f"{size}mm" if size else "", italic=True, size=10)
-            
-            # Weeks
-            p = bio_table.cell(i, 2).paragraphs[0]
-            add_run(p, f"{wks}weeks" if wks else "", italic=True, size=10)
-            
-            # Days
-            p = bio_table.cell(i, 3).paragraphs[0]
-            add_run(p, f"{dys}days±2w" if dys else "", italic=True, size=10)
+            add_run(bio_table.cell(i, 0).paragraphs[0], param.upper(), bold=True, italic=True, size=10)
+            add_run(bio_table.cell(i, 1).paragraphs[0], f"{size}mm" if size else "", italic=True, size=10)
+            add_run(bio_table.cell(i, 2).paragraphs[0], f"{wks}weeks" if wks else "", italic=True, size=10)
+            add_run(bio_table.cell(i, 3).paragraphs[0], f"{dys}days±2w" if dys else "", italic=True, size=10)
 
         doc.add_paragraph()
         
-        # Indices & Means
         p = doc.add_paragraph()
         add_run(p, "FL/HC= ", bold=True)
         add_run(p, f"{data.get('fl_hc', '')} ; ", italic=True)
@@ -254,7 +217,6 @@ def build_docx_bytes(data, template_id):
 
         doc.add_paragraph()
         
-        # EDD Table
         edd_table = doc.add_table(rows=2, cols=3)
         set_table_borders(edd_table)
         for row in edd_table.rows:
@@ -273,7 +235,6 @@ def build_docx_bytes(data, template_id):
 
         doc.add_paragraph()
         
-        # Anatomy
         p = doc.add_paragraph()
         add_run(p, "Placenta ", bold=True)
         add_run(p, f"is {data.get('placenta', 'ANTERIOR')} and away from the Os.")
@@ -285,9 +246,7 @@ def build_docx_bytes(data, template_id):
         p = doc.add_paragraph()
         add_run(p, "NO LOOP OF CORD SEEN AROUND THE NECK.", bold=True)
 
-    # --------------------------------------------------------
-    # 5. IMPRESSION
-    # --------------------------------------------------------
+    # --- 5. IMPRESSION ---
     doc.add_paragraph()
     imp_head = doc.add_paragraph()
     add_run(imp_head, "IMPRESSION:", bold=True, underline=True)
@@ -301,12 +260,9 @@ def build_docx_bytes(data, template_id):
     p = doc.add_paragraph()
     add_run(p, imp_text, bold=True, italic=True)
 
-    # --------------------------------------------------------
-    # 6. PNDT DISCLAIMER & NOTE BOX
-    # --------------------------------------------------------
+    # --- 6. PNDT DISCLAIMER & NOTE BOX ---
     doc.add_paragraph()
     
-    # Disclaimer Table (1x1)
     disc_table = doc.add_table(rows=1, cols=1)
     disc_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(disc_table)
@@ -318,7 +274,6 @@ def build_docx_bytes(data, template_id):
 
     doc.add_paragraph()
     
-    # Standard Note
     note_p = doc.add_paragraph()
     note_p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     add_run(note_p, "Note:- This is a obstetrical ultrasound, mainly done for estimation of gestational age, amount of liquor, placental position and general well-being of the fetus. Moreover, the anomalies in relation to fetal heart and limbs are extremely difficult to assess due to constantly changing position of the fetus and overlapping of its various parts.", bold=True, italic=True, size=8)
@@ -328,11 +283,22 @@ def build_docx_bytes(data, template_id):
     return buf.getvalue()
 
 # ============================================================
-# STREAMLIT UI (Clean Inputs)
+# STREAMLIT UI
 # ============================================================
-st.set_page_config(page_title="OB Reporting", layout="wide")
+st.set_page_config(page_title="OB Reporting Software", layout="wide")
 
-st.title("🩺 OB Reporting Software")
+# CSS for the clinic name and clean layout
+st.markdown("""
+    <style>
+    .clinic-title { text-align: center; color: #1F4E79; font-weight: 700; font-size: 2rem; margin-bottom: 0; padding-bottom: 0; }
+    .clinic-sub { text-align: center; color: #555; font-style: italic; font-size: 1.05rem; margin-top: 0; padding-top: 0; margin-bottom: 1.5rem; }
+    div[data-testid="stExpander"] { background-color: #ffffff !important; border: 1px solid #cfd6dd !important; }
+    </style>
+""", unsafe_allow_html=True)
+
+# CLINIC HEADER
+st.markdown('<div class="clinic-title">डॉ. प्रणव एवं डॉ. गौरव इमेजिंग, आगरा</div>', unsafe_allow_html=True)
+st.markdown('<div class="clinic-sub">Precision Imaging. Trusted Diagnostics. Agra.</div>', unsafe_allow_html=True)
 
 # Patient Demographics Top Bar
 c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 2, 3])
