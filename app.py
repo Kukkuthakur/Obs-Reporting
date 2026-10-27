@@ -706,4 +706,8 @@ st.markdown(
     /* === Buttons === */
     .stButton button,
     .stDownloadButton button,
-    div[data-testid="st
+    div[data-testid="stButton"] button,
+    div[data-testid="stDownloadButton"] button {
+        background-color: #ffffff !important;
+        color: #111111 !important;
+        border: 1px
