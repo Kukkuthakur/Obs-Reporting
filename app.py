@@ -710,4 +710,176 @@ st.markdown(
     div[data-testid="stDownloadButton"] button {
         background-color: #ffffff !important;
         color: #111111 !important;
-        border: 1px
+        border: 1px solid #cfd6dd !important;
+    }
+    .stButton button:hover,
+    .stDownloadButton button:hover {
+        background-color: #eef2f7 !important;
+        border-color: #305496 !important;
+    }
+
+    /* === Alerts / captions / hr === */
+    div[data-testid="stAlert"] {
+        background-color: #ffffff !important;
+        color: #111111 !important;
+    }
+    div[data-testid="stCaptionContainer"],
+    div[data-testid="stCaptionContainer"] * {
+        color: #555555 !important;
+    }
+    hr { border-color: #cfd6dd !important; }
+    div[data-testid="stMarkdownContainer"] * {
+        color: #111111;
+    }
+
+    /* === Dark code-style preview box === */
+    .preview-box,
+    .stApp .preview-box,
+    .stApp .preview-box * {
+        color: #ffffff !important;
+    }
+    .preview-box {
+        background-color: #2a2a2a !important;
+        font-family: Consolas, Menlo, 'Courier New', monospace !important;
+        font-size: 12.5px !important;
+        line-height: 1.5 !important;
+        padding: 14px 16px !important;
+        border-radius: 8px !important;
+        border: 1px solid #333 !important;
+        white-space: pre-wrap !important;
+        word-wrap: break-word !important;
+        overflow-wrap: anywhere !important;
+        word-break: break-word !important;
+        margin-bottom: 8px !important;
+        display: block !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown('<div class="clinic-title">डॉ. प्रणव एवं डॉ. गौरव इमेजिंग, आगरा</div>', unsafe_allow_html=True)
+st.markdown('<div class="clinic-sub">Precision Imaging. Trusted Diagnostics. Agra.</div>', unsafe_allow_html=True)
+
+# Patient Demographics Top Bar
+c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 2, 3])
+with c1: p_name = st.text_input("Name")
+with c2: p_age = st.text_input("Age")
+with c3: p_sex = st.radio("Sex", ["F", "M"], horizontal=True)
+with c4: p_date = st.text_input("Date", value=datetime.now().strftime("%d-%b-%y"))
+with c5: p_ref = st.text_input("Referred by")
+
+data = {"patient_name": p_name, "patient_age": p_age, "report_date": p_date, "referred_by": p_ref, "p_sex": p_sex}
+
+col1, col2 = st.columns([1, 1], gap="large")
+
+with col1:
+    template_id = st.selectbox("Template", ["EARLY_OBS", "T16", "T3"])
+
+    # LMP Logic
+    lmp_not_sure = st.checkbox("LMP Not Sure / Not Known")
+    data["lmp"] = "Not Sure" if lmp_not_sure else st.text_input("LMP")
+
+    # ==========================================
+    # DICOM ACCORDION (Machine Data)
+    # ==========================================
+    with st.expander("🔗 DICOM SR Data (Machine Generated)", expanded=False):
+        st.markdown('<div class="dicom-box">Verify or override data received from the ultrasound machine.</div>', unsafe_allow_html=True)
+        if template_id == "EARLY_OBS":
+            data["gsac"] = st.text_input("G-Sac", value="Seen")
+            data["crl"] = st.text_input("CRL", value="")
+            data["ga_crl"] = st.text_input("GA by CRL", value="")
+            data["yolk"] = st.text_input("Yolk sac", value="")
+            data["edd_lmp"] = st.text_input("EDD (LMP)", value="")
+            data["edd_cua"] = st.text_input("EDD (CUA)", value="")
+        else:
+            for param in ["bpd", "hc", "ac", "fl", "hl"]:
+                b1, b2, b3 = st.columns(3)
+                data[f"{param}_size"] = b1.text_input(f"{param.upper()} Size")
+                data[f"{param}_wks"] = b2.text_input(f"{param.upper()} Wks")
+                data[f"{param}_dys"] = b3.text_input(f"{param.upper()} Days")
+
+            b1, b2 = st.columns(2)
+            data["fl_hc"] = b1.text_input("FL/HC")
+            data["hc_ac"] = b2.text_input("HC/AC")
+
+            b1, b2 = st.columns(2)
+            data["mean_age"] = b1.text_input("Mean Age")
+            data["fetal_weight"] = b2.text_input("Fetal Weight (g)")
+
+            b1, b2 = st.columns(2)
+            data["fhr"] = b1.text_input("FHR")
+            data["edd_lmp"] = b2.text_input("EDD (LMP)")
+            data["edd_cua"] = st.text_input("EDD (CUA)")
+
+    # ==========================================
+    # MANUAL ENTRY (Typist Data)
+    # ==========================================
+    if template_id == "EARLY_OBS":
+        with st.expander("Early OBS Details", expanded=True):
+            data["cardiac_status"] = st.selectbox("Cardiac Activity", ["Present", "Not yet appreciable", "Blighted Ovum"])
+            if data["cardiac_status"] == "Present":
+                data["fhr_val"] = st.text_input("FHR Value (bpm)")
+
+            data["cervix"] = st.text_input("Cervix Length", value="Normal")
+
+            data["subchorionic_present"] = st.checkbox("Subchorionic collection present")
+            if data["subchorionic_present"]:
+                data["subchorionic_grade"] = st.radio("Grade", ["Grade-I", "Grade-I/II", "Grade-II", "Grade-II/III"], horizontal=True)
+
+            data["corpus_present"] = st.checkbox("Corpus Luteum Cyst present")
+            if data["corpus_present"]:
+                b1, b2 = st.columns(2)
+                data["corpus_side"] = b1.selectbox("Side", ["Right", "Left"])
+                data["corpus_size"] = b2.text_input("Size (mm)")
+
+    else:
+        with st.expander("Anatomy & Presentation", expanded=True):
+            b1, b2 = st.columns(2)
+            data["presentation"] = b1.selectbox("Presentation", ["VARIABLE", "CEPHALIC", "BREECH"])
+            data["lie"] = b2.selectbox("Lie", ["None", "LOA", "ROA", "LOP", "ROP"])
+
+            # AFI Logic
+            data["afi_method"] = st.radio("AFI Method", ["Largest Pocket", "Total 4 Quadrants"], horizontal=True)
+            if data["afi_method"] == "Total 4 Quadrants":
+                data["afi_total"] = st.text_input("AFI (cm)")
+            else:
+                data["afi_pocket"] = st.text_input("Largest Pocket (cm)")
+
+            b1, b2 = st.columns(2)
+            data["placenta_pos"] = b1.selectbox("Placenta Position", ["ANTERIOR", "POSTERIOR", "FUNDAL", "LOW-LYING"])
+            data["placenta_os"] = b2.selectbox("Placenta Relation to Os", ["away from the Os", "Low-lying", "Placenta Praevia"])
+
+            if data["placenta_os"] == "Low-lying":
+                data["placenta_dist"] = st.text_input("Distance from Internal Os (cm) [Optional]")
+            elif data["placenta_os"] == "Placenta Praevia":
+                data["praevia_grade"] = st.radio("Praevia Grade", ["Grade I", "Grade II", "Grade III", "Grade IV"], horizontal=True)
+
+            b1, b2 = st.columns(2)
+            data["cervix"] = b1.text_input("Cervix Length")
+            data["internal_os"] = b2.selectbox("Internal Os", ["Closed", "Open"])
+
+            st.markdown("**Cord Loop**")
+            data["cord_around"] = st.checkbox("Single loop of cord around the neck")
+            data["cord_straddling"] = st.checkbox("Single loop of cord straddling the neck")
+
+            if template_id == "T3":
+                st.markdown("**Scar Thickness**")
+                data["measure_scar"] = st.checkbox("Measure Scar Thickness")
+                if data["measure_scar"]:
+                    data["scar_size"] = st.text_input("Scar Size (mm)")
+with col2:
+    st.subheader("📄 Live Preview")
+    _preview_text = render_ob_preview(data, template_id)
+    _safe = html.escape(_preview_text).replace("\n", "<br>")
+    st.markdown(f'<div class="preview-box">{_safe}</div>',
+                unsafe_allow_html=True)
+
+    st.subheader("⬇️ Download Report")
+    docx_bytes = build_docx_bytes(data, template_id)
+    st.download_button(
+        label="Download Word Document",
+        data=docx_bytes,
+        file_name=f"OB_Report_{p_name or 'Unknown'}.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
