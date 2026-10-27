@@ -1,6 +1,5 @@
 import streamlit as st
 import html
-import hashlib
 import io
 from datetime import datetime
 
@@ -12,72 +11,45 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
 # ============================================================
-# SHARED CONFIGURATION (Simulating your shared/ files)
+# SHARED CONFIGURATION
 # ============================================================
 TEMPLATES = {
-    "EARLY_OBS": "Early OBS Scan (6-10 Weeks)",
-    "NT_NB": "Early OBS NT/NB Scan (11-14 Weeks)",
+    "EARLY_OBS": "Early OBS Scan",
     "T16": "OB Report (16 Weeks)",
-    "T20": "OB Report (20 Weeks)",
     "T22": "OB Report (22 Weeks)",
-    "T26": "OB Report (26 Weeks)",
-    "T28": "OB Report (28 Weeks)",
-    "T32": "OB Report (32 Weeks)",
     "T36": "OB Report (36 Weeks)",
-    "DOPPLER": "OB Doppler",
-    "LEVEL2": "Level II / Anomaly Scan"
 }
 
-# For this script, we will hardcode the fields to demonstrate the new logic
-# In your real app, this comes from shared/fields.py
-def get_template_blocks(template_id):
-    if template_id in ["EARLY_OBS", "NT_NB"]:
-        return ["HEADER", "LMP", "EARLY_PARAMS", "EDD", "OPINION"]
-    elif template_id == "LEVEL2":
-        return ["HEADER", "LMP", "EGA", "FETAL_SURVEY", "CRANIUM", "SPINE_FACE", "THORAX_ABDOMEN", "LIMBS", "INDICES", "DOPPLER", "OPINION"]
-    elif template_id == "DOPPLER":
-        return ["HEADER", "LMP", "EGA", "BIO_PHYSICAL", "DOPPLER_INDICES", "OPINION"]
-    else:
-        return ["HEADER", "LMP", "BIO_PHYSICAL", "ANATOMY", "OPINION"]
-
 # ============================================================
-# TEXT GENERATORS (Findings & Impression)
+# TEXT GENERATOR (For Live Preview)
 # ============================================================
 def generate_findings_text(template_id, data):
-    """Generates the plain text for the live preview box."""
     lines = []
-    
     if template_id == "EARLY_OBS":
         lines.append(f"G-Sac: {data.get('gsac', '')}")
         lines.append(f"CRL: {data.get('crl', '')}")
         lines.append(f"Yolk sac: {data.get('yolk', '')}")
         lines.append(f"Cardiac pulsations: {data.get('fhr', '')}")
-    elif template_id in ["T16", "T20", "T22", "T26", "T28", "T32", "T36"]:
+    else:
         lines.append(f"Uterus shows single live fetus. Fetus is in {data.get('presentation', 'VARIABLE')} PRESENTATION at the time of scanning.")
-        lines.append("")
-        lines.append("BIO PHYSICAL PARAMETERS:")
-        lines.append(f"BPD: {data.get('bpd_size', '')} | {data.get('bpd_wks', '')} {data.get('bpd_dys', '')}")
-        lines.append(f"HC: {data.get('hc_size', '')} | {data.get('hc_wks', '')} {data.get('hc_dys', '')}")
-        lines.append(f"AC: {data.get('ac_size', '')} | {data.get('ac_wks', '')} {data.get('ac_dys', '')}")
-        lines.append(f"FL: {data.get('fl_size', '')} | {data.get('fl_wks', '')} {data.get('fl_dys', '')}")
-        lines.append(f"HL: {data.get('hl_size', '')} | {data.get('hl_wks', '')} {data.get('hl_dys', '')}")
-    
+        lines.append("\nBIO PHYSICAL PARAMETERS:")
+        for param in ["bpd", "hc", "ac", "fl", "hl"]:
+            size = data.get(f"{param}_size", "")
+            wks = data.get(f"{param}_wks", "")
+            dys = data.get(f"{param}_dys", "")
+            if size:
+                lines.append(f"{param.upper()}: {size}mm | {wks}weeks {dys}days ±2w")
+        lines.append(f"\nMEAN AGE: {data.get('mean_age', '')}")
+        lines.append(f"FETAL WEIGHT: {data.get('fetal_weight', '')}")
+        lines.append(f"AFI: {data.get('afi', '')}")
+        lines.append(f"FHR: {data.get('fhr', '')}")
     return "\n".join(lines)
 
-def generate_impression(template_id, data):
-    if template_id == "EARLY_OBS":
-        return f"Intra uterine live pregnancy of {data.get('crl', '')} +/-1w with good cardiac activity."
-    elif template_id == "T16":
-        return f"Ultrasound obstetric reveals single live intrauterine fetus in variable presentation of approx. {data.get('mean_age', '')} gestation age."
-    else:
-        return f"Ultrasound obstetric reveals single live intrauterine fetus in {data.get('presentation', 'cephalic')} presentation of approx. {data.get('mean_age', '')} gestation age."
-
 # ============================================================
-# DOCX BUILDER (The core engine)
+# DOCX HELPERS & FORMATTING
 # ============================================================
 
 def _set_cell_border(cell, **kwargs):
-    """Allows us to remove borders on tables to make them look clean."""
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
     tcBorders = tcPr.first_child_found_in("w:tcBorders")
@@ -96,6 +68,19 @@ def _set_cell_border(cell, **kwargs):
                 if key in edge_data:
                     element.set(qn('w:{}'.format(key)), str(edge_data[key]))
 
+def _set_table_borders(table):
+    """Forces grid lines on the entire table."""
+    tbl = table._tbl
+    tblPr = tbl.tblPr
+    borders = OxmlElement("w:tblBorders")
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        e = OxmlElement(f"w:{edge}")
+        e.set(qn("w:val"), "single")
+        e.set(qn("w:sz"), "6")
+        e.set(qn("w:color"), "000000")
+        borders.append(e)
+    tblPr.append(borders)
+
 def _add_run(paragraph, text, bold=False, size=11, italic=False, color=None, underline=False):
     run = paragraph.add_run(text)
     run.font.name = "Calibri"
@@ -107,52 +92,17 @@ def _add_run(paragraph, text, bold=False, size=11, italic=False, color=None, und
         run.font.color.rgb = color
     return run
 
-def _create_docx_table(doc, data_rows, headers=None, col_widths=None):
-    """Creates a clean table, either with or without borders."""
-    if not data_rows: return
-    
-    cols = len(data_rows[0])
-    table = doc.add_table(rows=len(data_rows), cols=cols)
-    table.alignment = WD_TABLE_ALIGNMENT.LEFT
-    
-    # Optional header
-    row_offset = 0
-    if headers:
-        for j, h in enumerate(headers):
-            cell = table.cell(0, j)
-            cell.text = ""
-            p = cell.paragraphs[0]
-            _add_run(p, h, bold=True, size=10)
-            # Header border
-            _set_cell_border(cell, bottom={"sz": 12, "val": "single", "color": "000000"})
-        row_offset = 1
-
-    for i, row in enumerate(data_rows):
-        for j, text in enumerate(row):
-            cell = table.cell(i + row_offset, j)
-            cell.text = ""
-            p = cell.paragraphs[0]
-            p.paragraph_format.space_after = Pt(2)
-            p.paragraph_format.space_before = Pt(2)
-            # Make the first column bold (like BPD or G-Sac)
-            is_bold = (j == 0)
-            _add_run(p, str(text), bold=is_bold, size=10)
-
-    # Set widths if provided (e.g., [3cm, 2cm, 2cm, 2cm])
-    if col_widths:
-        for row in table.rows:
-            for idx, width in enumerate(col_widths):
-                row.cells[idx].width = width
-                
-    return table
+# ============================================================
+# DOCX GENERATION ENGINE
+# ============================================================
 
 def build_docx_bytes(data, template_id):
     doc = Document()
     section = doc.sections[0]
     section.page_height = Cm(29.7)
     section.page_width = Cm(21.0)
-    section.top_margin = Cm(1.5)
-    section.bottom_margin = Cm(1.5)
+    section.top_margin = Cm(2.0)
+    section.bottom_margin = Cm(2.0)
     section.left_margin = Cm(2.0)
     section.right_margin = Cm(2.0)
 
@@ -160,127 +110,198 @@ def build_docx_bytes(data, template_id):
     style.font.name = "Calibri"
     style.font.size = Pt(11)
 
-    # --- 1. Header Table (Demographics) ---
+    # --- 1. Demographics Table ---
+    # Exactly like the original: 2 rows, 2 columns, but with an inner divider
     header_table = doc.add_table(rows=2, cols=2)
     header_table.autofit = True
+    _set_table_borders(header_table)
+    
     cells = [
         (0, 0, f"NAME :- {data.get('patient_name', '')}"),
         (0, 1, f"DATE :- {data.get('report_date', '')}"),
-        (1, 0, f"AGE/SEX :- {data.get('patient_age', '')}Y/{data.get('p_sex', 'F')}"),
+        (1, 0, f"AGE/SEX :- {data.get('patient_age', '')}Y/ {data.get('p_sex', 'F')}"),
         (1, 1, f"REF. BY:- {data.get('referred_by', '')}"),
     ]
     for r, c, text in cells:
         cell = header_table.cell(r, c)
         cell.text = ""
-        _add_run(cell.paragraphs[0], text, bold=True, size=11)
-        _set_cell_border(cell, bottom={"sz": 6, "val": "single", "color": "000000"})
+        p = cell.paragraphs[0]
+        _add_run(p, text, bold=True, size=11)
 
     doc.add_paragraph()
-    
+
     # --- 2. Title ---
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _add_run(title, TEMPLATES[template_id].upper(), bold=True, underline=True, size=12, color=RGBColor(0x1F, 0x4E, 0x79))
+    _add_run(title, "ULTRASOUND OBSTETRICS REPORT", bold=True, underline=True, size=14, color=RGBColor(0x1F, 0x4E, 0x79))
     
-    if data.get("lmp"):
-        p = doc.add_paragraph()
-        _add_run(p, f"LMP- {data['lmp']}", bold=True, size=11)
-    
+    lmp_p = doc.add_paragraph()
+    _add_run(lmp_p, f"LMP- {data.get('lmp', '')}", bold=True, size=11)
     doc.add_paragraph()
 
-    # --- 3. Early OBS Specific Tables ---
+    # --- 3. EARLY OBS SPECIFIC ---
     if template_id == "EARLY_OBS":
-        early_rows = [
-            ["G-Sac", data.get('gsac', '')],
-            ["CRL", data.get('crl', '')],
-            ["Yolk sac", data.get('yolk', '')],
-            ["Cardiac pulsations", data.get('fhr', '')],
-            ["Decidual reaction", data.get('decidual', 'Present')],
-            ["Subchorionic collection", data.get('subchorionic', 'Absent')],
-            ["Corpus leuteal cyst", data.get('corpus', 'Not Appreciated')],
-            ["Cervix", data.get('cervix', 'Normal')],
-            ["Internal Os", data.get('os', 'Closed')],
-            ["Placenta", data.get('placenta', '')],
-        ]
-        _create_docx_table(doc, early_rows, col_widths=[Cm(5.5), Cm(11.5)])
+        early_table = doc.add_table(rows=10, cols=2)
+        _set_table_borders(early_table)
         
-        # EDD Table for Early OBS
-        doc.add_paragraph()
-        edd_rows = [
-            ["EDD (LMP)", data.get('edd_lmp', ''), "±2W"],
-            ["EDD (CUA)", data.get('edd_cua', ''), "±2W"],
+        early_data = [
+            ("G-Sac", data.get('gsac', '')),
+            ("CRL", data.get('crl', '')),
+            ("Yolk sac", data.get('yolk', '')),
+            ("Cardiac pulsations", data.get('fhr', '')),
+            ("Decidual reaction", "Present"),
+            ("Subchorionic collection", "Absent"),
+            ("Corpus leuteal cyst", "Appreciated"),
+            ("Cervix", data.get('cervix', 'Normal')),
+            ("Internal Os", "Closed"),
+            ("Placenta", "-"),
         ]
-        _create_docx_table(doc, edd_rows, col_widths=[Cm(3.5), Cm(5), Cm(3)])
+        for i, (label, val) in enumerate(early_data):
+            row = early_table.rows[i]
+            row.cells[0].text = ""
+            _add_run(row.cells[0].paragraphs[0], label, bold=True, italic=True, size=10)
+            row.cells[1].text = ""
+            _add_run(row.cells[1].paragraphs[0], val, size=10)
+            
+        doc.add_paragraph()
+        # EDD Table (Early)
+        edd_table = doc.add_table(rows=2, cols=3)
+        _set_table_borders(edd_table)
+        edd_data = [
+            ("EDD (LMP)", data.get('edd_lmp', ''), "±2W"),
+            ("EDD (CUA)", data.get('edd_cua', ''), "±2W"),
+        ]
+        for i, (label, date, err) in enumerate(edd_data):
+            row = edd_table.rows[i]
+            row.cells[0].text = ""
+            _add_run(row.cells[0].paragraphs[0], label, bold=True, italic=True, size=10)
+            row.cells[1].text = ""
+            _add_run(row.cells[1].paragraphs[0], date, size=10)
+            row.cells[2].text = ""
+            _add_run(row.cells[2].paragraphs[0], err, size=10)
 
-    # --- 4. Standard OB / Level 2 Specific Tables ---
-    elif template_id in ["T16", "T20", "T22", "T26", "T28", "T32", "T36", "DOPPLER", "LEVEL2"]:
-        # Intro Text
+    # --- 4. STANDARD OB (16, 22, 36 Weeks) ---
+    else:
+        # Intro Paragraph
         p = doc.add_paragraph()
         _add_run(p, f"Uterus shows single live fetus. Fetus is in {data.get('presentation', 'VARIABLE')} PRESENTATION at the time of scanning. Fetal movements are present. Fetal cardiac pulsations are appreciated.")
         
-        # Biometry Table
+        # Biometry Header
         bio_head = doc.add_paragraph()
         _add_run(bio_head, "BIO PHYSICAL PARAMETERS:", bold=True, underline=True)
         
-        bio_rows = [
-            ["BPD", data.get('bpd_size', ''), data.get('bpd_wks', ''), data.get('bpd_dys', '')],
-            ["HC", data.get('hc_size', ''), data.get('hc_wks', ''), data.get('hc_dys', '')],
-            ["AC", data.get('ac_size', ''), data.get('ac_wks', ''), data.get('ac_dys', '')],
-            ["FL", data.get('fl_size', ''), data.get('fl_wks', ''), data.get('fl_dys', '')],
-            ["HL", data.get('hl_size', ''), data.get('hl_wks', ''), data.get('hl_dys', '')],
+        # Biometry Table (BPD, HC, AC, FL, HL) - 4 Columns
+        bio_table = doc.add_table(rows=5, cols=4)
+        _set_table_borders(bio_table)
+        
+        params = ["bpd", "hc", "ac", "fl", "hl"]
+        for i, param in enumerate(params):
+            row = bio_table.rows[i]
+            
+            size = data.get(f"{param}_size", "")
+            wks = data.get(f"{param}_wks", "")
+            dys = data.get(f"{param}_dys", "")
+            
+            # Col 1: Name
+            row.cells[0].text = ""
+            _add_run(row.cells[0].paragraphs[0], param.upper(), bold=True, italic=True, size=10)
+            
+            # Col 2: Size
+            row.cells[1].text = ""
+            _add_run(row.cells[1].paragraphs[0], f"{size}mm", size=10)
+            
+            # Col 3: Weeks
+            row.cells[2].text = ""
+            _add_run(row.cells[2].paragraphs[0], f"{wks}weeks", size=10)
+            
+            # Col 4: Days
+            row.cells[3].text = ""
+            _add_run(row.cells[3].paragraphs[0], f"{dys}days±2w", size=10)
+
+        doc.add_paragraph()
+        
+        # Indices (FL/HC, HC/AC)
+        fl_hc = data.get('fl_hc', '')
+        hc_ac = data.get('hc_ac', '')
+        if template_id in ["T16", "T20"]:
+            ratios_text = f"FL/HC= {fl_hc} ; HC/AC = {hc_ac} (BOTH WNL)"
+        else:
+            ratios_text = f"FL/AC= {data.get('fl_ac', '')} ; FL/BPD = {data.get('fl_bpd', '')} (BOTH WNL)"
+        
+        p = doc.add_paragraph()
+        _add_run(p, ratios_text, bold=True)
+        
+        # Averages & Other Metrics
+        metrics = [
+            ("MEAN AGE :", data.get('mean_age', '')),
+            ("FETAL WEIGHT :", data.get('fetal_weight', '')),
+            ("AFI:-", f"Adequate, Largest Pocket Measures {data.get('afi', '')}"),
+            ("Foetal heart rate", f"is approx. {data.get('fhr', '')}"),
         ]
-        _create_docx_table(doc, bio_rows, col_widths=[Cm(3.5), Cm(4), Cm(4.5), Cm(4.5)])
-        
-        # Summary Metrics
+        for label, val in metrics:
+            p = doc.add_paragraph()
+            _add_run(p, f"{label} {val}", bold=False)
+
         doc.add_paragraph()
-        p = doc.add_paragraph()
-        _add_run(p, f"FL/HC= {data.get('fl_hc', '')} ; HC/AC = {data.get('hc_ac', '')} (BOTH WNL)", bold=True)
-        p = doc.add_paragraph()
-        _add_run(p, f"MEAN AGE : {data.get('mean_age', '')}", bold=True)
-        p = doc.add_paragraph()
-        _add_run(p, f"FETAL WEIGHT : {data.get('fetal_weight', '')}", bold=True)
-        p = doc.add_paragraph()
-        _add_run(p, f"AFI:- Adequate, Largest Pocket Measures {data.get('afi', '')}", bold=False)
-        p = doc.add_paragraph()
-        _add_run(p, f"Foetal heart rate is approx. {data.get('fhr', '')}", bold=False)
         
-        # EDD
-        doc.add_paragraph()
-        edd_rows = [
-            ["EDD (LMP)--", data.get('edd_lmp', ''), "±2W"],
-            ["EDD (CUA)--", data.get('edd_cua', ''), "±2W"],
+        # EDD Table (Standard)
+        edd_table = doc.add_table(rows=2, cols=3)
+        _set_table_borders(edd_table)
+        edd_data = [
+            ("EDD (LMP)--", data.get('edd_lmp', ''), "±2W"),
+            ("EDD (CUA)--", data.get('edd_cua', ''), "±2W"),
         ]
-        _create_docx_table(doc, edd_rows, col_widths=[Cm(3.5), Cm(5), Cm(3)])
-        
-        # Anatomy Details
+        for i, (label, date, err) in enumerate(edd_data):
+            row = edd_table.rows[i]
+            row.cells[0].text = ""
+            _add_run(row.cells[0].paragraphs[0], label, bold=True, italic=True, size=10)
+            row.cells[1].text = ""
+            _add_run(row.cells[1].paragraphs[0], date, size=10)
+            row.cells[2].text = ""
+            _add_run(row.cells[2].paragraphs[0], err, size=10)
+
+        # Anatomy / Placenta / Cervix
         doc.add_paragraph()
-        anat_p = doc.add_paragraph()
-        _add_run(anat_p, f"Placenta is {data.get('placenta', 'ANTERIOR')} and away from the Os.")
-        anat_p = doc.add_paragraph()
-        _add_run(anat_p, f"CERVIX- normal ({data.get('cervix', '3.5cm')}), internal Os is closed.")
-        anat_p = doc.add_paragraph()
-        _add_run(anat_p, f"{data.get('cord_loop', 'NO LOOP OF CORD SEEN AROUND THE NECK.')}")
+        p = doc.add_paragraph()
+        _add_run(p, f"Placenta is {data.get('placenta', 'ANTERIOR')} and away from the Os.", bold=False)
+        p = doc.add_paragraph()
+        _add_run(p, f"CERVIX- normal ({data.get('cervix', '')}), internal Os is closed.", bold=False)
+        p = doc.add_paragraph()
+        _add_run(p, "NO LOOP OF CORD SEEN AROUND THE NECK.", bold=True)
 
     # --- 5. Impression ---
     doc.add_paragraph()
     imp_head = doc.add_paragraph()
     _add_run(imp_head, "IMPRESSION:", bold=True, underline=True, color=RGBColor(0x1F, 0x4E, 0x79))
     
-    imp_text = generate_impression(template_id, data)
+    mean_age = data.get('mean_age', '')
+    presentation = data.get('presentation', 'variable').lower()
+    
+    if template_id == "EARLY_OBS":
+        imp_text = f"Intra uterine live pregnancy of {data.get('crl', '')} +/-1w with good cardiac activity."
+    elif template_id == "T16":
+        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in variable presentation of approx. {mean_age} gestation age."
+    else:
+        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {presentation} presentation of approx. {mean_age} gestation age."
+        
     p = doc.add_paragraph()
     _add_run(p, imp_text, bold=True, italic=True)
 
-    # --- 6. PNDT Disclaimer & Note ---
+    # --- 6. Disclaimer & Note ---
     doc.add_paragraph()
+    
+    # Disclaimer Table (1x1)
     disc_table = doc.add_table(rows=1, cols=1)
+    _set_table_borders(disc_table)
     cell = disc_table.cell(0, 0)
     cell.text = ""
-    _set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"})
     p = cell.paragraphs[0]
     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     _add_run(p, '"The radiologist has not conducted or caused to conduct any pre natal diagnostic technique (sonography) for the purpose of determining the sex of the foetus. No person including the person conducting the diagnostic procedure has communicated to the pregnant woman concerned or her relatives or any other person the sex of the foetus by words, signs, or in any other manner."', bold=True, size=8)
 
     doc.add_paragraph()
+    
+    # Standard Note
     note_p = doc.add_paragraph()
     note_p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     _add_run(note_p, "Note:- This is a obstetrical ultrasound, mainly done for estimation of gestational age, amount of liquor, placental position and general well-being of the fetus. Moreover, the anomalies in relation to fetal heart and limbs are extremely difficult to assess due to constantly changing position of the fetus and overlapping of its various parts.", italic=True, size=8)
@@ -329,39 +350,21 @@ with col_input:
             data["crl"] = st.text_input("CRL", value="17mm- 06wks 04days")
             data["yolk"] = st.text_input("Yolk sac", value="Not Seen")
             data["fhr"] = st.text_input("Cardiac pulsations", value="Present, 176 bpm")
+            data["cervix"] = st.text_input("Cervix", value="Normal (4.2cm)")
             data["edd_lmp"] = st.text_input("EDD (LMP)", value="26/03/2027")
             data["edd_cua"] = st.text_input("EDD (CUA)", value="04/04/2027")
             
-    elif template_id in ["T16", "T20", "T22", "T26", "T28", "T32", "T36", "LEVEL2"]:
+    else:
         with st.expander("Biometry & EGA", expanded=True):
             data["presentation"] = st.selectbox("Presentation", ["VARIABLE", "CEPHALIC"])
             
             # Biometry Grid
             st.markdown("**Biometry (Size, Weeks, Days)**")
-            b1, b2, b3 = st.columns(3)
-            data["bpd_size"] = b1.text_input("BPD Size", value="33mm")
-            data["bpd_wks"] = b2.text_input("BPD Wks", value="16weeks")
-            data["bpd_dys"] = b3.text_input("BPD Days", value="03days±2w")
-            
-            b1, b2, b3 = st.columns(3)
-            data["hc_size"] = b1.text_input("HC Size", value="124mm")
-            data["hc_wks"] = b2.text_input("HC Wks", value="16weeks")
-            data["hc_dys"] = b3.text_input("HC Days", value="02days±2w")
-            
-            b1, b2, b3 = st.columns(3)
-            data["ac_size"] = b1.text_input("AC Size", value="106mm")
-            data["ac_wks"] = b2.text_input("AC Wks", value="16weeks")
-            data["ac_dys"] = b3.text_input("AC Days", value="04days±2w")
-
-            b1, b2, b3 = st.columns(3)
-            data["fl_size"] = b1.text_input("FL Size", value="22mm")
-            data["fl_wks"] = b2.text_input("FL Wks", value="16weeks")
-            data["fl_dys"] = b3.text_input("FL Days", value="05days±2w")
-
-            b1, b2, b3 = st.columns(3)
-            data["hl_size"] = b1.text_input("HL Size", value="21mm")
-            data["hl_wks"] = b2.text_input("HL Wks", value="16weeks")
-            data["hl_dys"] = b3.text_input("HL Days", value="03days±2w")
+            for param in ["bpd", "hc", "ac", "fl", "hl"]:
+                b1, b2, b3 = st.columns(3)
+                data[f"{param}_size"] = b1.text_input(f"{param.upper()} Size", value="33" if param=="bpd" else "")
+                data[f"{param}_wks"] = b2.text_input(f"{param.upper()} Wks", value="16")
+                data[f"{param}_dys"] = b3.text_input(f"{param.upper()} Days", value="03")
 
             st.markdown("**Indices & Averages**")
             data["fl_hc"] = st.text_input("FL/HC", value="17.9%")
