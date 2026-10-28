@@ -24,26 +24,17 @@ def generate_percentile_bar(percentile):
     except:
         return None
 
-    # Create figure
     fig, ax = plt.subplots(figsize=(3, 0.4))
-    fig.patch.set_alpha(0) # Transparent background
+    fig.patch.set_alpha(0)
     
-    # Draw the line (10th to 90th percentile is the normal range, usually)
-    # We will draw a grey line from 0 to 100, and a green section from 10 to 90
     ax.plot([0, 100], [0, 0], color='lightgray', linewidth=4, zorder=1)
-    ax.plot([10, 90], [0, 0], color='#4CAF50', linewidth=4, zorder=2) # Green normal zone
-    
-    # Add the dot
-    color = '#D32F2F' # Red dot (like your screenshot)
-    # If it's outside normal limits (e.g. <10 or >90), you could make it a different color, 
-    # but your screenshot uses red dots universally.
-    ax.scatter(pct, 0, color=color, s=80, zorder=3, edgecolors='black')
+    ax.plot([10, 90], [0, 0], color='#4CAF50', linewidth=4, zorder=2)
+    ax.scatter(pct, 0, color='#D32F2F', s=80, zorder=3, edgecolors='black')
     
     ax.set_xlim(0, 100)
     ax.set_ylim(-0.5, 0.5)
-    ax.axis('off') # Hide axes
+    ax.axis('off')
     
-    # Save to memory
     buf = io.BytesIO()
     plt.savefig(buf, format="png", bbox_inches='tight', transparent=True, dpi=200)
     plt.close(fig)
@@ -103,14 +94,12 @@ def extract_sr_data(ds):
     from datetime import datetime, timedelta
     extracted = {}
     
-    # 1. First pass: find all measurements and percentiles
     def walk_tree(seq, current_site=""):
         for item in seq:
             concept = ""
             if 'ConceptNameCodeSequence' in item:
                 concept = item.ConceptNameCodeSequence[0].get('CodeMeaning', '')
             
-            # Track vessel for Doppler
             new_site = current_site
             if concept in ["Umbilical Artery", "Uterine Artery"]:
                 new_site = concept
@@ -127,7 +116,6 @@ def extract_sr_data(ds):
                 num_val = float(val_seq.get('NumericValue', 0))
                 unit = val_seq.get('MeasurementUnitsCodeSequence', [{}])[0].get('CodeMeaning', '')
                 
-                # --- BIOMETRY ---
                 if unit == 'centimeter':
                     if concept == 'Biparietal Diameter': extracted['bpd'] = f"{int(num_val * 10)}"
                     elif concept == 'Head Circumference': extracted['hc'] = f"{int(num_val * 10)}"
@@ -138,17 +126,14 @@ def extract_sr_data(ds):
                     elif concept == 'Crown Rump Length': extracted['crl'] = f"{int(num_val * 10)}"
                     elif concept == 'Nuchal Translucency': extracted['nt'] = f"{int(num_val * 10)}"
 
-                # Nasal bone is often sent as a text value or enum, but if sent as a number:
                 if concept == 'Nasal Bone':
                     extracted['nasal_bone'] = "Present" if num_val > 0 else "Absent"
                 
-                # --- DOPPLER ---
                 if new_site == "Umbilical Artery" and concept == 'Pulsatility Index':
                     extracted['umbilical_pi'] = str(num_val)
                 if new_site == "Uterine Artery" and concept == 'Pulsatility Index':
                     extracted['uterine_pi'] = str(num_val)
                 
-                # --- GENERAL ---
                 if concept == 'Estimated Weight': extracted['fetal_weight'] = str(int(num_val))
                 if concept == 'Fetal Heart Rate': extracted['fhr'] = str(int(num_val))
                 
@@ -159,20 +144,17 @@ def extract_sr_data(ds):
                 if concept == 'Gestational Age by LMP':
                     extracted['ga_lmp_days'] = int(num_val)
 
-                # --- PERCENTILES ---
                 if concept == 'Growth Percentile Rank':
                     if 'current_param' in extracted:
                         param = extracted['current_param']
                         extracted[f"{param}_pct"] = str(num_val)
 
-                # --- GESTATIONAL AGE PER PARAMETER ---
                 if concept == 'Gestational Age':
                     if 'current_param' in extracted:
                         param = extracted['current_param']
                         extracted[f"{param}_wks"] = str(int(num_val) // 7)
                         extracted[f"{param}_dys"] = str(int(num_val) % 7)
 
-            # Track biometry parameter
             if concept in ['Biparietal Diameter', 'Head Circumference', 'Abdominal Circumference', 'Femur Length', 'Humerus length']:
                 param_map = {
                     'Biparietal Diameter': 'bpd', 'Head Circumference': 'hc',
@@ -191,7 +173,6 @@ def extract_sr_data(ds):
         
     extracted.pop('current_param', None)
     
-    # Calculate missing LMP and EDDs
     today = datetime.now()
     if 'lmp' not in extracted and 'ga_lmp_days' in extracted:
         extracted['lmp'] = (today - timedelta(days=extracted['ga_lmp_days'])).strftime("%d-%m-%Y")
@@ -252,10 +233,7 @@ def generate_afi_text(afi_val, is_total=True):
         val = float(afi_val)
     except (ValueError, TypeError):
         return "Adequate", False
-
-    if not is_total:
-        return "", False 
-
+    if not is_total: return "", False 
     if val == 0: return "Nil, Not a single pocket of even one cm seen", True
     elif 0 < val < 4: return "Moderate to severe oligohydramnios", True
     elif 4 <= val < 6: return "Mild to moderate oligohydramnios", True
@@ -311,9 +289,39 @@ def build_docx_bytes(data, template_id):
     # 3. EARLY OBS
     if template_id == "EARLY_OBS":
         early_table = doc.add_table(rows=10, cols=2)
-        # ... early obs logic ...
-        # ... edd table ...
+        set_table_borders(early_table)
+        for row in early_table.rows:
+            row.cells[0].width = Cm(5.5)
+            row.cells[1].width = Cm(11.5)
+        subchorionic = "Absent" if not data.get("subchorionic_present") else f"Present; {data.get('subchorionic_grade', 'Grade-I')}"
+        corpus = "Not Appreciated" if not data.get("corpus_present") else f"Appreciated; {data.get('corpus_size', '')}mm in {data.get('corpus_side', 'Right')} Ovary"
+        cardiac = f"Present, {data.get('fhr_val', '')} bpm" if data.get('cardiac_status') == "Present" else data.get('cardiac_status')
         
+        early_data = [
+            ("G-Sac", data.get('gsac', 'Seen')), ("CRL", data.get('crl', '')),
+            ("Yolk sac", data.get('yolk', 'Not Seen')), ("Cardiac pulsations", cardiac),
+            ("Decidual reaction", "Present"), ("Subchorionic collection", subchorionic),
+            ("Corpus leuteal cyst", corpus), ("Cervix", data.get('cervix', 'Normal')),
+            ("Internal Os", "Closed"), ("Placenta", "-"),
+        ]
+        for i, (label, val) in enumerate(early_data):
+            add_run(early_table.cell(i, 0).paragraphs[0], label, italic=True, size=10)
+            add_run(early_table.cell(i, 1).paragraphs[0], val, italic=True, size=10)
+        doc.add_paragraph()
+
+        edd_table = doc.add_table(rows=2, cols=3)
+        set_table_borders(edd_table)
+        for row in edd_table.rows:
+            row.cells[0].width = Cm(3.5); row.cells[1].width = Cm(5.0); row.cells[2].width = Cm(3.0)
+        edd_data = [
+            ("EDD (LMP)", data.get('edd_lmp', '') if data.get('lmp') != "Not Sure" else "-", "±2W"),
+            ("EDD (CUA)", data.get('edd_cua', ''), "±2W"),
+        ]
+        for i, (label, date, err) in enumerate(edd_data):
+            add_run(edd_table.cell(i, 0).paragraphs[0], label, italic=True, size=10)
+            add_run(edd_table.cell(i, 1).paragraphs[0], date, size=10)
+            add_run(edd_table.cell(i, 2).paragraphs[0], err, size=10)
+
     # 3.5 NT_NB SCAN
     elif template_id == "NT_NB":
         nt_table = doc.add_table(rows=4, cols=4)
@@ -336,7 +344,6 @@ def build_docx_bytes(data, template_id):
             
         doc.add_paragraph()
         
-        # EDD Table
         edd_table = doc.add_table(rows=2, cols=3)
         set_table_borders(edd_table)
         for row in edd_table.rows:
@@ -349,9 +356,6 @@ def build_docx_bytes(data, template_id):
             add_run(edd_table.cell(i, 0).paragraphs[0], label, bold=True, italic=True, size=10)
             add_run(edd_table.cell(i, 1).paragraphs[0], date, italic=True, size=10)
             add_run(edd_table.cell(i, 2).paragraphs[0], err, italic=True, size=10)
-
-    # 4. STANDARD OB
-    else:
 
     # 4. STANDARD OB
     else:
@@ -378,7 +382,6 @@ def build_docx_bytes(data, template_id):
             add_run(bio_table.cell(i, 2).paragraphs[0], f"{wks}weeks" if wks else "", italic=True, size=10)
             add_run(bio_table.cell(i, 3).paragraphs[0], f"{dys}days±2w" if dys else "", italic=True, size=10)
             
-            # Insert Percentile Bar
             pct_val = data.get(f"{param}_pct", "")
             if pct_val:
                 bar_img = generate_percentile_bar(pct_val)
@@ -470,7 +473,6 @@ def build_docx_bytes(data, template_id):
     add_run(imp_head, "IMPRESSION:", bold=True, underline=True)
     mean_age = data.get('mean_age', '')
     if template_id == "EARLY_OBS":
-        if template_id == "EARLY_OBS":
         if data.get('cardiac_status') == "Blighted Ovum":
             imp_text = f"INTRA UTERINE EMPTY GESTATIONAL SAC OF {data.get('ga_crl', '')} +/-1w WITH NO APPRECIABLE FETAL POLE OR YOLK SAC - LIKELY EARLY PREGNANCY FAILURE (BLIGHTED OVUM)."
         elif data.get('cardiac_status') == "Not yet appreciable":
@@ -596,6 +598,8 @@ def render_ob_preview(data, template_id):
             imp_text = f"Intra uterine pregnancy of {data.get('ga_crl', '')} +/-1w with not yet appreciable cardiac activity. Adv- Review scan after 2 weeks."
         else:
             imp_text = f"Intra uterine live pregnancy of {data.get('ga_crl', '')} +/-1w with good cardiac activity."
+    elif template_id == "NT_NB":
+        imp_text = f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
     else:
         imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {data.get('presentation', 'variable').lower()} presentation of approx. {mean_age} gestation age."
     lines.append(f"  - {imp_text}")
