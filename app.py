@@ -103,14 +103,17 @@ def extract_sr_data(ds):
     from datetime import datetime, timedelta
     extracted = {}
     
+    # 1. First pass: find all measurements and percentiles
     def walk_tree(seq, current_site=""):
         for item in seq:
             concept = ""
             if 'ConceptNameCodeSequence' in item:
                 concept = item.ConceptNameCodeSequence[0].get('CodeMeaning', '')
             
+            # Track vessel for Doppler
+            new_site = current_site
             if concept in ["Umbilical Artery", "Uterine Artery"]:
-                current_site = concept
+                new_site = concept
 
             if item.ValueType == 'TEXT':
                 val = item.get('TextValue', '')
@@ -124,6 +127,7 @@ def extract_sr_data(ds):
                 num_val = float(val_seq.get('NumericValue', 0))
                 unit = val_seq.get('MeasurementUnitsCodeSequence', [{}])[0].get('CodeMeaning', '')
                 
+                # --- BIOMETRY ---
                 if unit == 'centimeter':
                     if concept == 'Biparietal Diameter': extracted['bpd'] = f"{int(num_val * 10)}"
                     elif concept == 'Head Circumference': extracted['hc'] = f"{int(num_val * 10)}"
@@ -133,11 +137,13 @@ def extract_sr_data(ds):
                     elif concept == 'Gestational Sac Diameter': extracted['msd'] = f"{int(num_val * 10)}"
                     elif concept == 'Crown Rump Length': extracted['crl'] = f"{int(num_val * 10)}"
                 
-                if current_site == "Umbilical Artery" and concept == 'Pulsatility Index':
+                # --- DOPPLER ---
+                if new_site == "Umbilical Artery" and concept == 'Pulsatility Index':
                     extracted['umbilical_pi'] = str(num_val)
-                if current_site == "Uterine Artery" and concept == 'Pulsatility Index':
+                if new_site == "Uterine Artery" and concept == 'Pulsatility Index':
                     extracted['uterine_pi'] = str(num_val)
                 
+                # --- GENERAL ---
                 if concept == 'Estimated Weight': extracted['fetal_weight'] = str(int(num_val))
                 if concept == 'Fetal Heart Rate': extracted['fhr'] = str(int(num_val))
                 
@@ -148,19 +154,25 @@ def extract_sr_data(ds):
                 if concept == 'Gestational Age by LMP':
                     extracted['ga_lmp_days'] = int(num_val)
 
+                # --- PERCENTILES ---
                 if concept == 'Growth Percentile Rank':
                     if 'current_param' in extracted:
                         param = extracted['current_param']
-                        extracted[f"{param}_pct"] = str(num_val)
+                        # Extract just the number from "3.1 percentile"
+                        try:
+                            pct_num = float(str(num_val).replace("percentile", "").strip())
+                            extracted[f"{param}_pct"] = str(pct_num)
+                        except:
+                            pass
 
+                # --- GESTATIONAL AGE PER PARAMETER ---
                 if concept == 'Gestational Age':
-                    wks = int(num_val) // 7
-                    dys = int(num_val) % 7
                     if 'current_param' in extracted:
                         param = extracted['current_param']
-                        extracted[f"{param}_wks"] = str(wks)
-                        extracted[f"{param}_dys"] = str(dys)
+                        extracted[f"{param}_wks"] = str(int(num_val) // 7)
+                        extracted[f"{param}_dys"] = str(int(num_val) % 7)
 
+            # Track biometry parameter
             if concept in ['Biparietal Diameter', 'Head Circumference', 'Abdominal Circumference', 'Femur Length', 'Humerus length']:
                 param_map = {
                     'Biparietal Diameter': 'bpd', 'Head Circumference': 'hc',
@@ -169,7 +181,7 @@ def extract_sr_data(ds):
                 extracted['current_param'] = param_map[concept]
             
             if 'ContentSequence' in item:
-                walk_tree(item.ContentSequence, current_site)
+                walk_tree(item.ContentSequence, new_site)
             
             if concept == 'Biometry Group':
                 extracted.pop('current_param', None)
@@ -179,6 +191,7 @@ def extract_sr_data(ds):
         
     extracted.pop('current_param', None)
     
+    # Calculate missing LMP and EDDs
     today = datetime.now()
     if 'lmp' not in extracted and 'ga_lmp_days' in extracted:
         extracted['lmp'] = (today - timedelta(days=extracted['ga_lmp_days'])).strftime("%d-%m-%Y")
@@ -621,7 +634,7 @@ with col1:
             for p in ["bpd", "hc", "ac", "fl", "hl"]:
                 if f"{p}_wks" in sr_data: st.session_state[f"sr_{p}_wks"] = sr_data[f"{p}_wks"]
                 if f"{p}_dys" in sr_data: st.session_state[f"sr_{p}_dys"] = sr_data[f"{p}_dys"]
-
+                if f"{p}_pct" in sr_data: st.session_state[f"sr_{p}_pct"] = sr_data[f"{p}_pct"]
             if 'msd' in sr_data: st.session_state["sr_msd"] = sr_data['msd']
             if 'crl' in sr_data: st.session_state["sr_crl"] = sr_data['crl']
             if 'fetal_weight' in sr_data: st.session_state["sr_fetal_weight"] = sr_data['fetal_weight']
