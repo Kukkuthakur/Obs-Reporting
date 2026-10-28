@@ -628,24 +628,39 @@ col1, col2 = st.columns([1, 1], gap="large")
 with col1:
     template_id = st.selectbox("Template", ["EARLY_OBS", "T16", "T3"])
     
-    # --- DICOM UPLOADER ---
-    uploaded_sr = st.file_uploader("🔗 Auto-Fill from DICOM SR", type=["dcm", "dicom", "ima", ""])
-    if uploaded_sr is not None:
+    # --- DUAL DICOM INPUT (Manual Upload + Listener) ---
+    import json
+    import os
+    
+    st.markdown("### 🔗 DICOM Input")
+    col_up, col_ref = st.columns([2, 1])
+    
+    with col_up:
+        uploaded_sr = st.file_uploader("Auto-Fill from File", type=["dcm", "dicom", "ima", ""], label_visibility="collapsed")
+        if uploaded_sr is not None:
+            try:
+                ds = pydicom.dcmread(io.BytesIO(uploaded_sr.read()))
+                st.session_state["sr_data"] = extract_sr_data(ds)
+                st.success("DICOM SR File Loaded!")
+            except Exception as e:
+                st.error(f"Error reading SR: {e}")
+                
+    with col_ref:
+        if st.button("🔄 Refresh from Listener", use_container_width=True):
+            st.rerun()
+            
+    # Check for automated listener file (if no manual file was uploaded)
+    if uploaded_sr is None and os.path.exists('latest_sr.json'):
         try:
-            ds = pydicom.dcmread(io.BytesIO(uploaded_sr.read()))
-            sr_data = extract_sr_data(ds)
+            with open('latest_sr.json', 'r') as f:
+                st.session_state["sr_data"] = json.load(f)
+            st.info("✅ Auto-loaded from DICOM Listener")
+        except:
+            pass
             
-            # Save the entire dictionary to session_state
-            st.session_state["sr_data"] = sr_data
-            
-            st.success("DICOM SR Loaded!")
-        except Exception as e:
-            st.error(f"Error reading SR: {e}")
-            
-    # Read from session_state so it persists
+    # Push values into session_state widgets
     sr_data = st.session_state.get("sr_data", {})
     
-    # Push values into session_state widgets
     if 'bpd' in sr_data: st.session_state["sr_bpd_size"] = sr_data['bpd']
     if 'hc' in sr_data: st.session_state["sr_hc_size"] = sr_data['hc']
     if 'ac' in sr_data: st.session_state["sr_ac_size"] = sr_data['ac']
