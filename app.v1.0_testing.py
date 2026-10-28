@@ -63,23 +63,18 @@ def calculate_uta_pi(pi: float, ga_weeks: int):
 # ============================================================
 def extract_sr_data(ds):
     extracted = {}
-    
-    def walk_tree(seq, current_site=""):
+    def walk_tree(seq, parent_concept=""):
         for item in seq:
             concept = ""
             if 'ConceptNameCodeSequence' in item:
                 concept = item.ConceptNameCodeSequence[0].get('CodeMeaning', '')
             
-            # Track the vessel we are currently inside (Umbilical or Uterine)
-            new_site = current_site
-            if concept in ["Umbilical Artery", "Uterine Artery"]:
-                new_site = concept
-
             # Grab Text Values (EDDs)
             if item.ValueType == 'TEXT':
                 val = item.get('TextValue', '')
                 if concept == 'EDD from average ultrasound age': extracted['edd_cua'] = val
                 if concept == 'EDD from LMP': extracted['edd_lmp'] = val
+                if concept == 'LMP': extracted['lmp'] = val
 
             # Grab Numeric Values
             if item.ValueType == 'NUM' and 'MeasuredValueSequence' in item:
@@ -97,34 +92,28 @@ def extract_sr_data(ds):
                     elif concept == 'Gestational Sac Diameter': extracted['msd'] = f"{int(num_val * 10)}"
                     elif concept == 'Crown Rump Length': extracted['crl'] = f"{int(num_val * 10)}"
                 
-                # --- DOPPLER (Sticky to vessel) ---
-                if new_site == "Umbilical Artery" and concept == 'Pulsatility Index':
+                # --- DOPPLER ---
+                if 'Umbilical Artery' in parent_concept and concept == 'Pulsatility Index':
                     extracted['umbilical_pi'] = str(num_val)
-                if new_site == "Uterine Artery" and concept == 'Pulsatility Index':
+                if 'Uterine Artery' in parent_concept and concept == 'Pulsatility Index':
                     extracted['uterine_pi'] = str(num_val)
                 
                 # --- GENERAL ---
                 if concept == 'Estimated Weight': extracted['fetal_weight'] = str(int(num_val))
                 if concept == 'Fetal Heart Rate': extracted['fhr'] = str(int(num_val))
-                
-                # --- GESTATIONAL AGES (Convert days to weeks/days) ---
                 if concept == 'Composite Ultrasound Age': 
-                    wks = int(num_val) // 7
-                    dys = int(num_val) % 7
-                    extracted['mean_age'] = f"{wks}weeks {dys}days ± 2w"
+                    extracted['ga_days'] = str(int(num_val))
+                    extracted['mean_age'] = f"{int(num_val)//7}weeks {int(num_val)%7}days ± 2w"
                 
-                # Grab specific GA for biometry if nested under specific measurement
+                # --- GESTATIONAL AGES ---
                 if concept == 'Gestational Age':
                     wks = int(num_val) // 7
                     dys = int(num_val) % 7
-                    # If we are currently processing a specific parameter, save its GA
                     if 'current_param' in extracted:
                         param = extracted['current_param']
                         extracted[f"{param}_wks"] = str(wks)
                         extracted[f"{param}_dys"] = str(dys)
 
-            # Keep track of which biometry parameter we are inside 
-            # so we can assign the Gestational Age correctly
             if concept in ['Biparietal Diameter', 'Head Circumference', 'Abdominal Circumference', 'Femur Length', 'Humerus length']:
                 param_map = {
                     'Biparietal Diameter': 'bpd', 'Head Circumference': 'hc',
@@ -133,9 +122,9 @@ def extract_sr_data(ds):
                 extracted['current_param'] = param_map[concept]
             
             if 'ContentSequence' in item:
-                walk_tree(item.ContentSequence, new_site)
+                new_parent = concept if concept in ["Umbilical Artery", "Uterine Artery"] else parent_concept
+                walk_tree(item.ContentSequence, new_parent)
             
-            # Clear current param when exiting the biometry group
             if concept == 'Biometry Group':
                 extracted.pop('current_param', None)
 
@@ -331,12 +320,10 @@ def build_docx_bytes(data, template_id):
         add_run(p, "AFI:- ", bold=True)
         afi_method = data.get('afi_method', 'Total 4 Quadrants')
         if afi_method == "Total 4 Quadrants":
-            afi_val = data.get('afi_total', '')
-            desc, is_abn = generate_afi_text(afi_val, is_total=True)
+            afi_val = data.get('afi_total', ''); desc, is_abn = generate_afi_text(afi_val, is_total=True)
             afi_str = desc if desc == "Nil, Not a single pocket of even one cm seen" else f"{desc}, total of four quadrants measures {afi_val} cm"
         else:
-            afi_val = data.get('afi_pocket', '')
-            desc, is_abn = generate_afi_text(afi_val, is_total=False)
+            afi_val = data.get('afi_pocket', ''); desc, is_abn = generate_afi_text(afi_val, is_total=False)
             afi_str = f"largest pocket measures {afi_val} cm" if not desc else f"{desc}, largest pocket measures {afi_val} cm"
         add_run(p, afi_str, bold=is_abn, italic=is_abn)
 
@@ -459,12 +446,10 @@ def render_ob_preview(data, template_id):
 
         afi_method = data.get('afi_method', 'Total 4 Quadrants')
         if afi_method == "Total 4 Quadrants":
-            afi_val = data.get('afi_total', '')
-            desc, is_abn = generate_afi_text(afi_val, is_total=True)
+            afi_val = data.get('afi_total', ''); desc, _ = generate_afi_text(afi_val, is_total=True)
             afi_str = desc if desc == "Nil, Not a single pocket of even one cm seen" else f"{desc}, total of four quadrants measures {afi_val} cm"
         else:
-            afi_val = data.get('afi_pocket', '')
-            desc, is_abn = generate_afi_text(afi_val, is_total=False)
+            afi_val = data.get('afi_pocket', ''); desc, _ = generate_afi_text(afi_val, is_total=False)
             afi_str = f"largest pocket measures {afi_val} cm" if not desc else f"{desc}, largest pocket measures {afi_val} cm"
         lines.append(f"AFI:- {afi_str}")
         lines.append(f"Foetal heart rate is approx. {data.get('fhr', '')}.")
@@ -549,6 +534,7 @@ st.markdown("""
 st.markdown('<div class="clinic-title">डॉ. प्रणव एवं डॉ. गौरव इमेजिंग, आगरा</div>', unsafe_allow_html=True)
 st.markdown('<div class="clinic-sub">Precision Imaging. Trusted Diagnostics. Agra.</div>', unsafe_allow_html=True)
 
+# Patient Demographics Top Bar
 c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 2, 3])
 with c1: p_name = st.text_input("Name")
 with c2: p_age = st.text_input("Age")
@@ -563,38 +549,34 @@ col1, col2 = st.columns([1, 1], gap="large")
 with col1:
     template_id = st.selectbox("Template", ["EARLY_OBS", "T16", "T3"])
     
-    # --- NEW DICOM UPLOADER ---
+    # --- DICOM UPLOADER ---
     uploaded_sr = st.file_uploader("🔗 Auto-Fill from DICOM SR", type=["dcm", "dicom", "ima", ""])
     if uploaded_sr is not None:
         try:
             ds = pydicom.dcmread(io.BytesIO(uploaded_sr.read()))
             sr_data = extract_sr_data(ds)
             
-            # Push values into session_state so the app picks them up
-            # Sizes
+            # Push values into session_state
             if 'bpd' in sr_data: st.session_state["sr_bpd_size"] = sr_data['bpd']
             if 'hc' in sr_data: st.session_state["sr_hc_size"] = sr_data['hc']
             if 'ac' in sr_data: st.session_state["sr_ac_size"] = sr_data['ac']
             if 'fl' in sr_data: st.session_state["sr_fl_size"] = sr_data['fl']
             if 'hl' in sr_data: st.session_state["sr_hl_size"] = sr_data['hl']
             
-            # Weeks & Days
             for p in ["bpd", "hc", "ac", "fl", "hl"]:
                 if f"{p}_wks" in sr_data: st.session_state[f"sr_{p}_wks"] = sr_data[f"{p}_wks"]
                 if f"{p}_dys" in sr_data: st.session_state[f"sr_{p}_dys"] = sr_data[f"{p}_dys"]
 
-            # General
             if 'msd' in sr_data: st.session_state["sr_msd"] = sr_data['msd']
             if 'crl' in sr_data: st.session_state["sr_crl"] = sr_data['crl']
             if 'fetal_weight' in sr_data: st.session_state["sr_fetal_weight"] = sr_data['fetal_weight']
             if 'fhr' in sr_data: st.session_state["sr_fhr"] = sr_data['fhr']
             if 'mean_age' in sr_data: st.session_state["sr_mean_age"] = sr_data['mean_age']
             
-            # EDDs
             if 'edd_lmp' in sr_data: st.session_state["sr_edd_lmp"] = sr_data['edd_lmp']
             if 'edd_cua' in sr_data: st.session_state["sr_edd_cua"] = sr_data['edd_cua']
+            if 'lmp' in sr_data: st.session_state["sr_lmp"] = sr_data['lmp']
             
-            # Doppler
             if 'umbilical_pi' in sr_data: st.session_state["sr_umbilical_pi"] = sr_data['umbilical_pi']
             if 'uterine_pi' in sr_data: st.session_state["sr_uterine_pi"] = sr_data['uterine_pi']
             
@@ -604,17 +586,21 @@ with col1:
     # --------------------------
 
     lmp_not_sure = st.checkbox("LMP Not Sure / Not Known")
-    data["lmp"] = "Not Sure" if lmp_not_sure else st.text_input("LMP")
+    if lmp_not_sure:
+        data["lmp"] = "Not Sure"
+    else:
+        data["lmp"] = st.text_input("LMP", value=st.session_state.get("sr_lmp", ""))
 
     with st.expander("🔗 DICOM SR Data (Machine Generated)", expanded=False):
         st.markdown('<div class="dicom-box">Verify or override data received from the ultrasound machine.</div>', unsafe_allow_html=True)
         if template_id == "EARLY_OBS":
             data["gsac"] = st.text_input("G-Sac", value=st.session_state.get("sr_gsac", "Seen"), key="sr_gsac")
+            data["msd"] = st.text_input("MSD", value=st.session_state.get("sr_msd", ""), key="sr_msd")
             data["crl"] = st.text_input("CRL", value=st.session_state.get("sr_crl", ""), key="sr_crl")
             data["ga_crl"] = st.text_input("GA by CRL", value="")
             data["yolk"] = st.text_input("Yolk sac", value="")
-            data["edd_lmp"] = st.text_input("EDD (LMP)", value="")
-            data["edd_cua"] = st.text_input("EDD (CUA)", value="")
+            data["edd_lmp"] = st.text_input("EDD (LMP)", value=st.session_state.get("sr_edd_lmp", ""))
+            data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get("sr_edd_cua", ""))
         else:
             for param in ["bpd", "hc", "ac", "fl", "hl"]:
                 b1, b2, b3 = st.columns(3)
@@ -622,9 +608,33 @@ with col1:
                 data[f"{param}_wks"] = b2.text_input(f"{param.upper()} Wks", value=st.session_state.get(f"sr_{param}_wks", ""), key=f"sr_{param}_wks")
                 data[f"{param}_dys"] = b3.text_input(f"{param.upper()} Days", value=st.session_state.get(f"sr_{param}_dys", ""), key=f"sr_{param}_dys")
 
+            # Ratios & Averages
+            st.markdown("**Ratios & Averages**")
             b1, b2 = st.columns(2)
-            data["fl_hc"] = b1.text_input("FL/HC", value="")
-            data["hc_ac"] = b2.text_input("HC/AC", value="")
+            
+            # Calculate ratios on the fly if we have the values
+            try:
+                if data.get("fl_size") and data.get("hc_size"):
+                    fl_hc_val = (float(data["fl_size"]) / float(data["hc_size"])) * 100
+                    st.session_state["sr_fl_hc"] = f"{fl_hc_val:.1f}%"
+                if data.get("hc_size") and data.get("ac_size"):
+                    hc_ac_val = float(data["hc_size"]) / float(data["ac_size"])
+                    st.session_state["sr_hc_ac"] = f"{hc_ac_val:.2f}"
+                if data.get("fl_size") and data.get("bpd_size"):
+                    fl_bpd_val = (float(data["fl_size"]) / float(data["bpd_size"])) * 100
+                    st.session_state["sr_fl_bpd"] = f"{fl_bpd_val:.1f}%"
+                if data.get("fl_size") and data.get("ac_size"):
+                    fl_ac_val = (float(data["fl_size"]) / float(data["ac_size"])) * 100
+                    st.session_state["sr_fl_ac"] = f"{fl_ac_val:.1f}%"
+            except:
+                pass
+
+            data["fl_hc"] = b1.text_input("FL/HC", value=st.session_state.get("sr_fl_hc", ""))
+            data["hc_ac"] = b2.text_input("HC/AC", value=st.session_state.get("sr_hc_ac", ""))
+            
+            b1, b2 = st.columns(2)
+            data["fl_bpd"] = b1.text_input("FL/BPD", value=st.session_state.get("sr_fl_bpd", ""))
+            data["fl_ac"] = b2.text_input("FL/AC", value=st.session_state.get("sr_fl_ac", ""))
 
             b1, b2 = st.columns(2)
             data["mean_age"] = b1.text_input("Mean Age", value=st.session_state.get("sr_mean_age", ""), key="sr_mean_age")
@@ -632,8 +642,8 @@ with col1:
 
             b1, b2 = st.columns(2)
             data["fhr"] = b1.text_input("FHR", value=st.session_state.get("sr_fhr", ""), key="sr_fhr")
-            data["edd_lmp"] = b2.text_input("EDD (LMP)", value=st.session_state.get("sr_edd_lmp", ""), key="sr_edd_lmp")
-            data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get("sr_edd_cua", ""), key="sr_edd_cua")
+            data["edd_lmp"] = b2.text_input("EDD (LMP)", value=st.session_state.get("sr_edd_lmp", ""))
+            data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get("sr_edd_cua", ""))
             
             st.markdown("**Doppler Indices & Percentiles**")
             b1, b2, b3 = st.columns(3)
