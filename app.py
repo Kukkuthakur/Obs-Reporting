@@ -11,6 +11,44 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 import pydicom
+import matplotlib.pyplot as plt
+import numpy as np
+
+def generate_percentile_bar(percentile):
+    """Generates a small PNG image of a percentile bar."""
+    if not percentile:
+        return None
+    
+    try:
+        pct = float(percentile)
+    except:
+        return None
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(3, 0.4))
+    fig.patch.set_alpha(0) # Transparent background
+    
+    # Draw the line (10th to 90th percentile is the normal range, usually)
+    # We will draw a grey line from 0 to 100, and a green section from 10 to 90
+    ax.plot([0, 100], [0, 0], color='lightgray', linewidth=4, zorder=1)
+    ax.plot([10, 90], [0, 0], color='#4CAF50', linewidth=4, zorder=2) # Green normal zone
+    
+    # Add the dot
+    color = '#D32F2F' # Red dot (like your screenshot)
+    # If it's outside normal limits (e.g. <10 or >90), you could make it a different color, 
+    # but your screenshot uses red dots universally.
+    ax.scatter(pct, 0, color=color, s=80, zorder=3, edgecolors='black')
+    
+    ax.set_xlim(0, 100)
+    ax.set_ylim(-0.5, 0.5)
+    ax.axis('off') # Hide axes
+    
+    # Save to memory
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", bbox_inches='tight', transparent=True, dpi=200)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
 
 # ============================================================
 # BARCELONA / FMF Z-SCORE CALCULATOR
@@ -577,6 +615,12 @@ with col1:
             if 'edd_cua' in sr_data: st.session_state["sr_edd_cua"] = sr_data['edd_cua']
             if 'lmp' in sr_data: st.session_state["sr_lmp"] = sr_data['lmp']
             
+            if 'ga_lmp_days' in sr_data: 
+                st.session_state["sr_ga_lmp"] = f"{sr_data['ga_lmp_days']//7}w{sr_data['ga_lmp_days']%7}d"
+                
+            for p in ["bpd", "hc", "ac", "fl", "hl"]:
+                if f"{p}_pct" in sr_data: st.session_state[f"sr_{p}_pct"] = sr_data[f"{p}_pct"]
+
             if 'umbilical_pi' in sr_data: st.session_state["sr_umbilical_pi"] = sr_data['umbilical_pi']
             if 'uterine_pi' in sr_data: st.session_state["sr_uterine_pi"] = sr_data['uterine_pi']
             
@@ -593,6 +637,15 @@ with col1:
 
     with st.expander("🔗 DICOM SR Data (Machine Generated)", expanded=False):
         st.markdown('<div class="dicom-box">Verify or override data received from the ultrasound machine.</div>', unsafe_allow_html=True)
+        
+        if template_id != "EARLY_OBS":
+            # Timeline Header
+            st.markdown(f"**LMP:** {st.session_state.get('sr_lmp', '')} &nbsp;|&nbsp; "
+                        f"**GA(LMP):** {st.session_state.get('sr_ga_lmp', '')} &nbsp;|&nbsp; "
+                        f"**AUA:** {st.session_state.get('sr_mean_age', '')} &nbsp;|&nbsp; "
+                        f"**EDD(LMP):** {st.session_state.get('sr_edd_lmp', '')}")
+            st.markdown("---")
+
         if template_id == "EARLY_OBS":
             data["gsac"] = st.text_input("G-Sac", value=st.session_state.get("sr_gsac", "Seen"), key="sr_gsac")
             data["msd"] = st.text_input("MSD", value=st.session_state.get("sr_msd", ""), key="sr_msd")
@@ -602,13 +655,40 @@ with col1:
             data["edd_lmp"] = st.text_input("EDD (LMP)", value=st.session_state.get("sr_edd_lmp", ""))
             data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get("sr_edd_cua", ""))
         else:
-            for param in ["bpd", "hc", "ac", "fl", "hl"]:
-                b1, b2, b3 = st.columns(3)
-                data[f"{param}_size"] = b1.text_input(f"{param.upper()} Size", value=st.session_state.get(f"sr_{param}_size", ""), key=f"sr_{param}_size")
-                data[f"{param}_wks"] = b2.text_input(f"{param.upper()} Wks", value=st.session_state.get(f"sr_{param}_wks", ""), key=f"sr_{param}_wks")
-                data[f"{param}_dys"] = b3.text_input(f"{param.upper()} Days", value=st.session_state.get(f"sr_{param}_dys", ""), key=f"sr_{param}_dys")
+            st.markdown("**Fetal Growth Parameters**")
+            h1, h2, h3, h4, h5 = st.columns([2, 1, 1, 1, 3])
+            h1.caption("Parameter")
+            h2.caption("Size (mm)")
+            h3.caption("Wks")
+            h4.caption("Days")
+            h5.caption("Percentile")
 
-            # Ratios & Averages
+            params = [
+                ("bpd", "Biparietal Diameter"),
+                ("hc", "Head Circumference"),
+                ("ac", "Abdominal Circumference"),
+                ("fl", "Femur Length"),
+                ("hl", "Humerus Length")
+            ]
+
+            for p_key, p_name in params:
+                c1, c2, c3, c4, c5 = st.columns([2, 1, 1, 1, 3])
+                c1.markdown(f"**{p_name}**")
+                
+                data[f"{p_key}_size"] = c2.text_input(f"{p_key} size", value=st.session_state.get(f"sr_{p_key}_size", ""), key=f"sr_{p_key}_size", label_visibility="collapsed")
+                data[f"{p_key}_wks"] = c3.text_input(f"{p_key} wks", value=st.session_state.get(f"sr_{p_key}_wks", ""), key=f"sr_{p_key}_wks", label_visibility="collapsed")
+                data[f"{p_key}_dys"] = c4.text_input(f"{p_key} dys", value=st.session_state.get(f"sr_{p_key}_dys", ""), key=f"sr_{p_key}_dys", label_visibility="collapsed")
+                
+                pct_val = st.session_state.get(f"sr_{p_key}_pct", "")
+                if pct_val:
+                    bar_img = generate_percentile_bar(pct_val)
+                    if bar_img:
+                        c5.image(bar_img, use_column_width=True)
+                        c5.caption(f"{pct_val}%")
+                else:
+                    c5.text_input(f"{p_key} pct", value="", key=f"sr_{p_key}_pct_display", label_visibility="collapsed")
+
+            st.markdown("---")
             st.markdown("**Ratios & Averages**")
             b1, b2 = st.columns(2)
             
