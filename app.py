@@ -357,10 +357,10 @@ def build_docx_bytes(data, template_id):
         add_run(bio_head, "BIO PHYSICAL PARAMETERS:", bold=True, underline=True)
         bio_head.paragraph_format.space_after = Pt(6)
 
-        bio_table = doc.add_table(rows=5, cols=4)
+        bio_table = doc.add_table(rows=5, cols=5)
         set_table_borders(bio_table)
         for row in bio_table.rows:
-            row.cells[0].width = Cm(3.5); row.cells[1].width = Cm(4.0); row.cells[2].width = Cm(4.5); row.cells[3].width = Cm(4.5)
+            row.cells[0].width = Cm(3.5); row.cells[1].width = Cm(2.5); row.cells[2].width = Cm(2.5); row.cells[3].width = Cm(2.5); row.cells[4].width = Cm(5.0)
         params = ["bpd", "hc", "ac", "fl", "hl"]
         for i, param in enumerate(params):
             size = data.get(f"{param}_size", ""); wks = data.get(f"{param}_wks", ""); dys = data.get(f"{param}_dys", "")
@@ -368,6 +368,17 @@ def build_docx_bytes(data, template_id):
             add_run(bio_table.cell(i, 1).paragraphs[0], f"{size}mm" if size else "", italic=True, size=10)
             add_run(bio_table.cell(i, 2).paragraphs[0], f"{wks}weeks" if wks else "", italic=True, size=10)
             add_run(bio_table.cell(i, 3).paragraphs[0], f"{dys}days±2w" if dys else "", italic=True, size=10)
+            
+            # Insert Percentile Bar
+            pct_val = data.get(f"{param}_pct", "")
+            if pct_val:
+                bar_img = generate_percentile_bar(pct_val)
+                if bar_img:
+                    cell = bio_table.cell(i, 4)
+                    cell.paragraphs[0].add_run().add_picture(bar_img, width=Cm(4.0))
+                    p = cell.add_paragraph(f"{pct_val}%")
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    p.runs[0].font.size = Pt(8)
         doc.add_paragraph()
 
         ratio_table = doc.add_table(rows=1, cols=2)
@@ -624,41 +635,44 @@ with col1:
             ds = pydicom.dcmread(io.BytesIO(uploaded_sr.read()))
             sr_data = extract_sr_data(ds)
             
-            # Push values into session_state
-            if 'bpd' in sr_data: st.session_state["sr_bpd_size"] = sr_data['bpd']
-            if 'hc' in sr_data: st.session_state["sr_hc_size"] = sr_data['hc']
-            if 'ac' in sr_data: st.session_state["sr_ac_size"] = sr_data['ac']
-            if 'fl' in sr_data: st.session_state["sr_fl_size"] = sr_data['fl']
-            if 'hl' in sr_data: st.session_state["sr_hl_size"] = sr_data['hl']
-            
-            for p in ["bpd", "hc", "ac", "fl", "hl"]:
-                if f"{p}_wks" in sr_data: st.session_state[f"sr_{p}_wks"] = sr_data[f"{p}_wks"]
-                if f"{p}_dys" in sr_data: st.session_state[f"sr_{p}_dys"] = sr_data[f"{p}_dys"]
-                if f"{p}_pct" in sr_data: st.session_state[f"sr_{p}_pct"] = sr_data[f"{p}_pct"]
-            if 'msd' in sr_data: st.session_state["sr_msd"] = sr_data['msd']
-            if 'crl' in sr_data: st.session_state["sr_crl"] = sr_data['crl']
-            if 'fetal_weight' in sr_data: st.session_state["sr_fetal_weight"] = sr_data['fetal_weight']
-            if 'fhr' in sr_data: st.session_state["sr_fhr"] = sr_data['fhr']
-            if 'mean_age' in sr_data: st.session_state["sr_mean_age"] = sr_data['mean_age']
-            
-            if 'edd_lmp' in sr_data: st.session_state["sr_edd_lmp"] = sr_data['edd_lmp']
-            if 'edd_cua' in sr_data: st.session_state["sr_edd_cua"] = sr_data['edd_cua']
-            if 'lmp' in sr_data: st.session_state["sr_lmp"] = sr_data['lmp']
-            
-            if 'ga_lmp_days' in sr_data: 
-                st.session_state["sr_ga_lmp"] = f"{sr_data['ga_lmp_days']//7}w{sr_data['ga_lmp_days']%7}d"
-                
-            for p in ["bpd", "hc", "ac", "fl", "hl"]:
-                if f"{p}_pct" in sr_data: st.session_state[f"sr_{p}_pct"] = sr_data[f"{p}_pct"]
-
-            if 'umbilical_pi' in sr_data: st.session_state["sr_umbilical_pi"] = sr_data['umbilical_pi']
-            if 'uterine_pi' in sr_data: st.session_state["sr_uterine_pi"] = sr_data['uterine_pi']
+            # Save the entire dictionary to session_state
+            st.session_state["sr_data"] = sr_data
             
             st.success("DICOM SR Loaded!")
         except Exception as e:
             st.error(f"Error reading SR: {e}")
-    # --------------------------
+            
+    # Read from session_state so it persists
+    sr_data = st.session_state.get("sr_data", {})
+    
+    # Push values into session_state widgets
+    if 'bpd' in sr_data: st.session_state["sr_bpd_size"] = sr_data['bpd']
+    if 'hc' in sr_data: st.session_state["sr_hc_size"] = sr_data['hc']
+    if 'ac' in sr_data: st.session_state["sr_ac_size"] = sr_data['ac']
+    if 'fl' in sr_data: st.session_state["sr_fl_size"] = sr_data['fl']
+    if 'hl' in sr_data: st.session_state["sr_hl_size"] = sr_data['hl']
+    
+    for p in ["bpd", "hc", "ac", "fl", "hl"]:
+        if f"{p}_wks" in sr_data: st.session_state[f"sr_{p}_wks"] = sr_data[f"{p}_wks"]
+        if f"{p}_dys" in sr_data: st.session_state[f"sr_{p}_dys"] = sr_data[f"{p}_dys"]
+        if f"{p}_pct" in sr_data: st.session_state[f"sr_{p}_pct"] = sr_data[f"{p}_pct"]
 
+    if 'msd' in sr_data: st.session_state["sr_msd"] = sr_data['msd']
+    if 'crl' in sr_data: st.session_state["sr_crl"] = sr_data['crl']
+    if 'fetal_weight' in sr_data: st.session_state["sr_fetal_weight"] = sr_data['fetal_weight']
+    if 'fhr' in sr_data: st.session_state["sr_fhr"] = sr_data['fhr']
+    if 'mean_age' in sr_data: st.session_state["sr_mean_age"] = sr_data['mean_age']
+    
+    if 'edd_lmp' in sr_data: st.session_state["sr_edd_lmp"] = sr_data['edd_lmp']
+    if 'edd_cua' in sr_data: st.session_state["sr_edd_cua"] = sr_data['edd_cua']
+    if 'lmp' in sr_data: st.session_state["sr_lmp"] = sr_data['lmp']
+    
+    if 'ga_lmp_days' in sr_data: 
+        st.session_state["sr_ga_lmp"] = f"{sr_data['ga_lmp_days']//7}w{sr_data['ga_lmp_days']%7}d"
+
+    if 'umbilical_pi' in sr_data: st.session_state["sr_umbilical_pi"] = sr_data['umbilical_pi']
+    if 'uterine_pi' in sr_data: st.session_state["sr_uterine_pi"] = sr_data['uterine_pi']
+    # --------------------------
     lmp_not_sure = st.checkbox("LMP Not Sure / Not Known")
     if lmp_not_sure:
         data["lmp"] = "Not Sure"
