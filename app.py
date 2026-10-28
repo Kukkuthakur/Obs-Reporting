@@ -190,11 +190,15 @@ def add_run(paragraph, text, bold=False, italic=False, size=11, underline=False,
         run.font.color.rgb = color
     return run
 
-def generate_afi_text(afi_val):
+def generate_afi_text(afi_val, is_total=True):
     try:
         val = float(afi_val)
     except (ValueError, TypeError):
         return "Adequate", False
+
+    if not is_total:
+        return "", False 
+
     if val == 0: return "Nil, Not a single pocket of even one cm seen", True
     elif 0 < val < 4: return "Moderate to severe oligohydramnios", True
     elif 4 <= val < 6: return "Mild to moderate oligohydramnios", True
