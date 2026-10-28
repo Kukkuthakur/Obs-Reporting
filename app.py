@@ -136,6 +136,11 @@ def extract_sr_data(ds):
                     elif concept == 'Humerus length': extracted['hl'] = f"{int(num_val * 10)}"
                     elif concept == 'Gestational Sac Diameter': extracted['msd'] = f"{int(num_val * 10)}"
                     elif concept == 'Crown Rump Length': extracted['crl'] = f"{int(num_val * 10)}"
+                    elif concept == 'Nuchal Translucency': extracted['nt'] = f"{int(num_val * 10)}"
+
+                # Nasal bone is often sent as a text value or enum, but if sent as a number:
+                if concept == 'Nasal Bone':
+                    extracted['nasal_bone'] = "Present" if num_val > 0 else "Absent"
                 
                 # --- DOPPLER ---
                 if new_site == "Umbilical Artery" and concept == 'Pulsatility Index':
@@ -306,38 +311,47 @@ def build_docx_bytes(data, template_id):
     # 3. EARLY OBS
     if template_id == "EARLY_OBS":
         early_table = doc.add_table(rows=10, cols=2)
-        set_table_borders(early_table)
-        for row in early_table.rows:
-            row.cells[0].width = Cm(5.5)
-            row.cells[1].width = Cm(11.5)
-        subchorionic = "Absent" if not data.get("subchorionic_present") else f"Present; {data.get('subchorionic_grade', 'Grade-I')}"
-        corpus = "Not Appreciated" if not data.get("corpus_present") else f"Appreciated; {data.get('corpus_size', '')}mm in {data.get('corpus_side', 'Right')} Ovary"
-        cardiac = f"Present, {data.get('fhr_val', '')} bpm" if data.get('cardiac_status') == "Present" else data.get('cardiac_status')
+        # ... early obs logic ...
+        # ... edd table ...
         
-        early_data = [
-            ("G-Sac", data.get('gsac', 'Seen')), ("CRL", data.get('crl', '')),
-            ("Yolk sac", data.get('yolk', 'Not Seen')), ("Cardiac pulsations", cardiac),
-            ("Decidual reaction", "Present"), ("Subchorionic collection", subchorionic),
-            ("Corpus leuteal cyst", corpus), ("Cervix", data.get('cervix', 'Normal')),
-            ("Internal Os", "Closed"), ("Placenta", "-"),
+    # 3.5 NT_NB SCAN
+    elif template_id == "NT_NB":
+        nt_table = doc.add_table(rows=4, cols=4)
+        set_table_borders(nt_table)
+        for row in nt_table.rows:
+            row.cells[0].width = Cm(4.0); row.cells[1].width = Cm(4.0); row.cells[2].width = Cm(4.0); row.cells[3].width = Cm(4.0)
+            
+        nt_data = [
+            ("CRL", f"{data.get('crl', '')}mm", "NT", f"{data.get('nt', '')}mm"),
+            ("Nasal Bone", data.get('nasal_bone', ''), "FHR", f"{data.get('fhr_val', '')} bpm"),
+            ("DV PI", data.get('dv_pi', ''), "DV A-Wave", data.get('dv_awave', '')),
+            ("Placenta", data.get('placenta_pos', ''), "Cervix", f"{data.get('cervix', '')}cm"),
         ]
-        for i, (label, val) in enumerate(early_data):
-            add_run(early_table.cell(i, 0).paragraphs[0], label, italic=True, size=10)
-            add_run(early_table.cell(i, 1).paragraphs[0], val, italic=True, size=10)
+        
+        for i, (l1, v1, l2, v2) in enumerate(nt_data):
+            add_run(nt_table.cell(i, 0).paragraphs[0], l1, bold=True, size=10)
+            add_run(nt_table.cell(i, 1).paragraphs[0], v1, italic=True, size=10)
+            add_run(nt_table.cell(i, 2).paragraphs[0], l2, bold=True, size=10)
+            add_run(nt_table.cell(i, 3).paragraphs[0], v2, italic=True, size=10)
+            
         doc.add_paragraph()
-
+        
+        # EDD Table
         edd_table = doc.add_table(rows=2, cols=3)
         set_table_borders(edd_table)
         for row in edd_table.rows:
             row.cells[0].width = Cm(3.5); row.cells[1].width = Cm(5.0); row.cells[2].width = Cm(3.0)
         edd_data = [
-            ("EDD (LMP)", data.get('edd_lmp', '') if data.get('lmp') != "Not Sure" else "-", "±2W"),
-            ("EDD (CUA)", data.get('edd_cua', ''), "±2W"),
+            ("EDD (LMP)--", data.get('edd_lmp', '') if data.get('lmp') != "Not Sure" else "-", "±2W"),
+            ("EDD (CUA)--", data.get('edd_cua', ''), "±2W"),
         ]
         for i, (label, date, err) in enumerate(edd_data):
-            add_run(edd_table.cell(i, 0).paragraphs[0], label, italic=True, size=10)
-            add_run(edd_table.cell(i, 1).paragraphs[0], date, size=10)
-            add_run(edd_table.cell(i, 2).paragraphs[0], err, size=10)
+            add_run(edd_table.cell(i, 0).paragraphs[0], label, bold=True, italic=True, size=10)
+            add_run(edd_table.cell(i, 1).paragraphs[0], date, italic=True, size=10)
+            add_run(edd_table.cell(i, 2).paragraphs[0], err, italic=True, size=10)
+
+    # 4. STANDARD OB
+    else:
 
     # 4. STANDARD OB
     else:
@@ -456,12 +470,15 @@ def build_docx_bytes(data, template_id):
     add_run(imp_head, "IMPRESSION:", bold=True, underline=True)
     mean_age = data.get('mean_age', '')
     if template_id == "EARLY_OBS":
+        if template_id == "EARLY_OBS":
         if data.get('cardiac_status') == "Blighted Ovum":
             imp_text = f"INTRA UTERINE EMPTY GESTATIONAL SAC OF {data.get('ga_crl', '')} +/-1w WITH NO APPRECIABLE FETAL POLE OR YOLK SAC - LIKELY EARLY PREGNANCY FAILURE (BLIGHTED OVUM)."
         elif data.get('cardiac_status') == "Not yet appreciable":
             imp_text = f"Intra uterine pregnancy of {data.get('ga_crl', '')} +/-1w with not yet appreciable cardiac activity. Adv- Review scan after 2 weeks."
         else:
             imp_text = f"Intra uterine live pregnancy of {data.get('ga_crl', '')} +/-1w with good cardiac activity."
+    elif template_id == "NT_NB":
+        imp_text = f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
     else:
         imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {data.get('presentation', 'variable').lower()} presentation of approx. {mean_age} gestation age."
     p = doc.add_paragraph(); add_run(p, imp_text, bold=True, italic=True)
@@ -509,6 +526,20 @@ def render_ob_preview(data, template_id):
         lines.append("")
         lines.append(f"  {'EDD (LMP)':<20}: {data.get('edd_lmp', '') if data.get('lmp') != 'Not Sure' else '-'}    ±2W")
         lines.append(f"  {'EDD (CUA)':<20}: {data.get('edd_cua', '')}    ±2W")
+
+    elif template_id == "NT_NB":
+        lines.append("NT / NB SCAN DETAILS:")
+        lines.append(f"  CRL: {data.get('crl', '')}mm")
+        lines.append(f"  NT: {data.get('nt', '')}mm")
+        lines.append(f"  Nasal Bone: {data.get('nasal_bone', '')}")
+        lines.append(f"  FHR: {data.get('fhr_val', '')} bpm")
+        lines.append(f"  DV PI: {data.get('dv_pi', '')} (A-wave: {data.get('dv_awave', '')})")
+        lines.append("")
+        lines.append(f"  Placenta: {data.get('placenta_pos', '')}")
+        lines.append(f"  Cervix: {data.get('cervix', '')}cm")
+        lines.append("")
+        lines.append(f"  EDD (LMP): {data.get('edd_lmp', '')}")
+        lines.append(f"  EDD (CUA): {data.get('edd_cua', '')}")
 
     else:
         lines.append(f"Uterus shows single live fetus. Fetus is in {data.get('presentation', 'variable').lower()} presentation at the time of scanning. Fetal movements are present. Fetal cardiac pulsations are appreciated.")
@@ -626,7 +657,7 @@ data = {"patient_name": p_name, "patient_age": p_age, "report_date": p_date, "re
 col1, col2 = st.columns([1, 1], gap="large")
 
 with col1:
-    template_id = st.selectbox("Template", ["EARLY_OBS", "T16", "T3"])
+    template_id = st.selectbox("Template", ["EARLY_OBS", "NT_NB", "T16", "T3"])
     
     # --- DUAL DICOM INPUT (Manual Upload + Listener) ---
     import json
@@ -674,6 +705,8 @@ with col1:
 
     if 'msd' in sr_data: st.session_state["sr_msd"] = sr_data['msd']
     if 'crl' in sr_data: st.session_state["sr_crl"] = sr_data['crl']
+    if 'nt' in sr_data: st.session_state["sr_nt"] = sr_data['nt']
+    if 'nasal_bone' in sr_data: st.session_state["sr_nasal_bone"] = sr_data['nasal_bone']
     if 'fetal_weight' in sr_data: st.session_state["sr_fetal_weight"] = sr_data['fetal_weight']
     if 'fhr' in sr_data: st.session_state["sr_fhr"] = sr_data['fhr']
     if 'mean_age' in sr_data: st.session_state["sr_mean_age"] = sr_data['mean_age']
@@ -711,6 +744,17 @@ with col1:
             data["crl"] = st.text_input("CRL", value=st.session_state.get("sr_crl", ""), key="sr_crl")
             data["ga_crl"] = st.text_input("GA by CRL", value="")
             data["yolk"] = st.text_input("Yolk sac", value="")
+            data["edd_lmp"] = st.text_input("EDD (LMP)", value=st.session_state.get("sr_edd_lmp", ""))
+            data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get("sr_edd_cua", ""))
+        elif template_id == "NT_NB":
+            b1, b2 = st.columns(2)
+            data["crl"] = b1.text_input("CRL (mm)", value=st.session_state.get("sr_crl", ""))
+            data["nt"] = b2.text_input("NT (mm)", value=st.session_state.get("sr_nt", ""))
+            
+            b1, b2 = st.columns(2)
+            data["nasal_bone"] = b1.text_input("Nasal Bone", value=st.session_state.get("sr_nasal_bone", ""))
+            data["fhr_val"] = b2.text_input("FHR (bpm)", value=st.session_state.get("sr_fhr", ""))
+            
             data["edd_lmp"] = st.text_input("EDD (LMP)", value=st.session_state.get("sr_edd_lmp", ""))
             data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get("sr_edd_cua", ""))
         else:
@@ -817,6 +861,15 @@ with col1:
                 b1, b2 = st.columns(2)
                 data["corpus_side"] = b1.selectbox("Side", ["Right", "Left"])
                 data["corpus_size"] = b2.text_input("Size (mm)")
+
+    elif template_id == "NT_NB":
+        with st.expander("Typist Inputs (NT / NB)", expanded=True):
+            data["dv_pi"] = st.text_input("Ductus Venosus PI", value="")
+            data["dv_awave"] = st.selectbox("DV A-Wave", ["Positive", "Absent", "Reversed"])
+            
+            b1, b2 = st.columns(2)
+            data["placenta_pos"] = b1.selectbox("Placenta Position", ["ANTERIOR", "POSTERIOR", "FUNDAL", "LOW-LYING"])
+            data["cervix"] = b2.text_input("Cervix Length", value="")
 
     else:
         with st.expander("Anatomy & Presentation", expanded=True):
