@@ -158,12 +158,7 @@ def extract_sr_data(ds):
                 if concept == 'Growth Percentile Rank':
                     if 'current_param' in extracted:
                         param = extracted['current_param']
-                        # Extract just the number from "3.1 percentile"
-                        try:
-                            pct_num = float(str(num_val).replace("percentile", "").strip())
-                            extracted[f"{param}_pct"] = str(pct_num)
-                        except:
-                            pass
+                        extracted[f"{param}_pct"] = str(num_val)
 
                 # --- GESTATIONAL AGE PER PARAMETER ---
                 if concept == 'Gestational Age':
@@ -375,10 +370,15 @@ def build_docx_bytes(data, template_id):
                 bar_img = generate_percentile_bar(pct_val)
                 if bar_img:
                     cell = bio_table.cell(i, 4)
-                    cell.paragraphs[0].add_run().add_picture(bar_img, width=Cm(4.0))
-                    p = cell.add_paragraph(f"{pct_val}%")
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    p.runs[0].font.size = Pt(8)
+                    p_img = cell.paragraphs[0]
+                    p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    run = p_img.add_run()
+                    run.add_picture(bar_img, width=Cm(3.5))
+                    
+                    p_txt = cell.add_paragraph(f"{pct_val}%")
+                    p_txt.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    if p_txt.runs:
+                        p_txt.runs[0].font.size = Pt(8)
         doc.add_paragraph()
 
         ratio_table = doc.add_table(rows=1, cols=2)
