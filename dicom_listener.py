@@ -5,7 +5,7 @@ from pynetdicom import AE, evt, StoragePresentationContexts
 
 # --- CONFIGURATION ---
 # You can change these, but make sure they match your Streamlit app and USG machine settings
-AE_TITLE = 'OB_REPORT_APP'
+AE_TITLE = 'PG_RADIO_REPORTS'
 PORT = 11112
 STORAGE_DIR = 'received_sr'
 JSON_FILE = 'latest_sr.json'
