@@ -136,7 +136,7 @@ def main():
     print("Waiting for the ultrasound machine to send a report...")
     print("Leave this window open while you are working.")
     
-    ae.start_server(('0.0.0.0', PORT), evt_handlers=handlers)
+    ae.start_server(('172.16.1.21', PORT), evt_handlers=handlers)
 
 if __name__ == '__main__':
     main()
