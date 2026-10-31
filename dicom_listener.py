@@ -1,16 +1,16 @@
 import os
 import json
 import pydicom
-from pynetdicom import AE, evt, StoragePresentationContexts
+from pynetdicom import AE, evt
+from pynetdicom.sop_class import Verification
+from pynetdicom.presentation import AllStoragePresentationContexts
 
 # --- CONFIGURATION ---
-# You can change these, but make sure they match your Streamlit app and USG machine settings
-AE_TITLE = 'PG_RADIO_REPORTS'
-PORT = 11112
+AE_TITLE = 'PCARE'
+PORT = 5103
 STORAGE_DIR = 'received_sr'
 JSON_FILE = 'latest_sr.json'
 
-# Create storage directory if it doesn't exist
 if not os.path.exists(STORAGE_DIR):
     os.makedirs(STORAGE_DIR)
 
@@ -49,7 +49,14 @@ def extract_sr_data(ds):
                     elif concept == 'Humerus length': extracted['hl'] = f"{int(num_val * 10)}"
                     elif concept == 'Gestational Sac Diameter': extracted['msd'] = f"{int(num_val * 10)}"
                     elif concept == 'Crown Rump Length': extracted['crl'] = f"{int(num_val * 10)}"
+                    elif concept == 'Nuchal Translucency': extracted['nt'] = f"{int(num_val * 10)}"
+
+                if concept == 'Nasal Bone':
+                    extracted['nasal_bone'] = f"{num_val}mm"
                 
+                if 'Choroid Plexus' in concept or 'Falx' in concept:
+                    extracted['falx'] = "Appreciated, appear Normal"
+
                 if new_site == "Umbilical Artery" and concept == 'Pulsatility Index':
                     extracted['umbilical_pi'] = str(num_val)
                 if new_site == "Uterine Artery" and concept == 'Pulsatility Index':
@@ -106,37 +113,57 @@ def extract_sr_data(ds):
 
 # --- C-STORE HANDLER ---
 def handle_store(event):
-    ds = event.dataset
-    ds.file_meta = event.file_meta
-    
-    # 1. Save the raw .dcm file
-    filename = f"{STORAGE_DIR}/{ds.SOPInstanceUID}.dcm"
-    ds.save_as(filename, write_like_original=False)
-    print(f"\n[+] Received DICOM file: {ds.PatientName}")
-    
-    # 2. Parse the data and save to JSON for Streamlit
     try:
-        parsed_data = extract_sr_data(ds)
-        with open(JSON_FILE, 'w') as f:
-            json.dump(parsed_data, f)
-        print(f"[+] Successfully parsed data and saved to {JSON_FILE}")
+        ds = event.dataset
+        ds.file_meta = event.file_meta
+        
+        # Check if it's an SR or an Image
+        sop_class = str(ds.get('SOPClassUID', ''))
+        is_sr = '1.2.840.10008.5.1.4.1.1.88' in sop_class
+        
+        if is_sr:
+            filename = f"{STORAGE_DIR}/{ds.SOPInstanceUID}.dcm"
+            ds.save_as(filename, write_like_original=False)
+            print(f"\n[+] Received SR for Patient: {ds.PatientName}")
+            try:
+                parsed_data = extract_sr_data(ds)
+                with open(JSON_FILE, 'w') as f:
+                    json.dump(parsed_data, f)
+                print(f"[+] Successfully parsed SR data and saved to {JSON_FILE}")
+            except Exception as e:
+                print(f"[-] Error parsing SR data: {e}")
+        else:
+            # If it's an image, we accept it silently so the machine doesn't fail
+            print(f"\n[*] Received Image ({ds.get('Modality', 'US')}) - Ignored for report.")
+            
+        return 0x0000
     except Exception as e:
-        print(f"[-] Error parsing data: {e}")
+        print(f"\n[!] Error handling file: {e}")
+        return 0x0000 
 
+# --- C-ECHO HANDLER ---
+def handle_echo(event):
+    print("\n[+] Verification (C-ECHO) request received from machine!")
     return 0x0000
 
 # --- START SERVER ---
 def main():
     ae = AE(ae_title=AE_TITLE)
-    ae.supported_contexts = StoragePresentationContexts
     
-    handlers = [(evt.EVT_C_STORE, handle_store)]
+    # Accept ALL possible formats (Images, SRs, Privates)
+    ae.supported_contexts = AllStoragePresentationContexts
+    ae.add_supported_context(Verification)
+    
+    handlers = [
+        (evt.EVT_C_STORE, handle_store),
+        (evt.EVT_C_ECHO, handle_echo)
+    ]
     
     print(f"Starting DICOM Listener on Port {PORT} with AE Title '{AE_TITLE}'...")
-    print("Waiting for the ultrasound machine to send a report...")
+    print("Waiting for the ultrasound machine...")
     print("Leave this window open while you are working.")
     
-    ae.start_server(('172.16.1.21', PORT), evt_handlers=handlers)
+    ae.start_server(('0.0.0.0', PORT), evt_handlers=handlers)
 
 if __name__ == '__main__':
     main()
