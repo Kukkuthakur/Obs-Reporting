@@ -753,33 +753,35 @@ with col1:
     with st.expander("🔗 DICOM SR Data (Machine Generated)", expanded=False):
         st.markdown('<div class="dicom-box">Verify or override data received from the ultrasound machine.</div>', unsafe_allow_html=True)
         
+        v = st.session_state.get("dicom_version", 0)
+
         if template_id != "EARLY_OBS":
             # Timeline Header
-            st.markdown(f"**LMP:** {st.session_state.get('sr_lmp', '')} &nbsp;|&nbsp; "
-                        f"**GA(LMP):** {st.session_state.get('sr_ga_lmp', '')} &nbsp;|&nbsp; "
-                        f"**AUA:** {st.session_state.get('sr_mean_age', '')} &nbsp;|&nbsp; "
-                        f"**EDD(LMP):** {st.session_state.get('sr_edd_lmp', '')}")
+            st.markdown(f"**LMP:** {st.session_state.get(f'sr_lmp_{v}', '')} &nbsp;|&nbsp; "
+                        f"**GA(LMP):** {st.session_state.get(f'sr_ga_lmp_{v}', '')} &nbsp;|&nbsp; "
+                        f"**AUA:** {st.session_state.get(f'sr_mean_age_{v}', '')} &nbsp;|&nbsp; "
+                        f"**EDD(LMP):** {st.session_state.get(f'sr_edd_lmp_{v}', '')}")
             st.markdown("---")
 
         if template_id == "EARLY_OBS":
-            data["gsac"] = st.text_input("G-Sac", value=st.session_state.get("sr_gsac", "Seen"), key="sr_gsac")
-            data["msd"] = st.text_input("MSD", value=st.session_state.get("sr_msd", ""), key="sr_msd")
-            data["crl"] = st.text_input("CRL", value=st.session_state.get("sr_crl", ""), key="sr_crl")
+            data["gsac"] = st.text_input("G-Sac", value=st.session_state.get(f"sr_gsac_{v}", "Seen"), key=f"sr_gsac_{v}")
+            data["msd"] = st.text_input("MSD", value=st.session_state.get(f"sr_msd_{v}", ""), key=f"sr_msd_{v}")
+            data["crl"] = st.text_input("CRL", value=st.session_state.get(f"sr_crl_{v}", ""), key=f"sr_crl_{v}")
             data["ga_crl"] = st.text_input("GA by CRL", value="")
             data["yolk"] = st.text_input("Yolk sac", value="")
-            data["edd_lmp"] = st.text_input("EDD (LMP)", value=st.session_state.get("sr_edd_lmp", ""))
-            data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get("sr_edd_cua", ""))
+            data["edd_lmp"] = st.text_input("EDD (LMP)", value=st.session_state.get(f"sr_edd_lmp_{v}", ""), key=f"sr_edd_lmp_{v}")
+            data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get(f"sr_edd_cua_{v}", ""), key=f"sr_edd_cua_{v}")
         elif template_id == "NT_NB":
             b1, b2 = st.columns(2)
-            data["crl"] = b1.text_input("CRL (mm)", value=st.session_state.get("sr_crl", ""))
-            data["nt"] = b2.text_input("NT (mm)", value=st.session_state.get("sr_nt", ""))
+            data["crl"] = b1.text_input("CRL (mm)", value=st.session_state.get(f"sr_crl_{v}", ""), key=f"sr_crl_{v}")
+            data["nt"] = b2.text_input("NT (mm)", value=st.session_state.get(f"sr_nt_{v}", ""), key=f"sr_nt_{v}")
             
             b1, b2 = st.columns(2)
-            data["nasal_bone"] = b1.text_input("Nasal Bone", value=st.session_state.get("sr_nasal_bone", ""))
-            data["fhr_val"] = b2.text_input("FHR (bpm)", value=st.session_state.get("sr_fhr", ""))
+            data["nasal_bone"] = b1.text_input("Nasal Bone", value=st.session_state.get(f"sr_nasal_bone_{v}", ""), key=f"sr_nasal_bone_{v}")
+            data["fhr_val"] = b2.text_input("FHR (bpm)", value=st.session_state.get(f"sr_fhr_{v}", ""), key=f"sr_fhr_{v}")
             
-            data["edd_lmp"] = st.text_input("EDD (LMP)", value=st.session_state.get("sr_edd_lmp", ""))
-            data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get("sr_edd_cua", ""))
+            data["edd_lmp"] = st.text_input("EDD (LMP)", value=st.session_state.get(f"sr_edd_lmp_{v}", ""), key=f"sr_edd_lmp_{v}")
+            data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get(f"sr_edd_cua_{v}", ""), key=f"sr_edd_cua_{v}")
         else:
             st.markdown("**Fetal Growth Parameters**")
             h1, h2, h3, h4, h5 = st.columns([2, 1, 1, 1, 3])
@@ -801,61 +803,60 @@ with col1:
                 c1, c2, c3, c4, c5 = st.columns([2, 1, 1, 1, 3])
                 c1.markdown(f"**{p_name}**")
                 
-                data[f"{p_key}_size"] = c2.text_input(f"{p_key} size", value=st.session_state.get(f"sr_{p_key}_size", ""), key=f"sr_{p_key}_size", label_visibility="collapsed")
-                data[f"{p_key}_wks"] = c3.text_input(f"{p_key} wks", value=st.session_state.get(f"sr_{p_key}_wks", ""), key=f"sr_{p_key}_wks", label_visibility="collapsed")
-                data[f"{p_key}_dys"] = c4.text_input(f"{p_key} dys", value=st.session_state.get(f"sr_{p_key}_dys", ""), key=f"sr_{p_key}_dys", label_visibility="collapsed")
+                data[f"{p_key}_size"] = c2.text_input(f"{p_key} size", value=st.session_state.get(f"sr_{p_key}_size_{v}", ""), key=f"sr_{p_key}_size_{v}", label_visibility="collapsed")
+                data[f"{p_key}_wks"] = c3.text_input(f"{p_key} wks", value=st.session_state.get(f"sr_{p_key}_wks_{v}", ""), key=f"sr_{p_key}_wks_{v}", label_visibility="collapsed")
+                data[f"{p_key}_dys"] = c4.text_input(f"{p_key} dys", value=st.session_state.get(f"sr_{p_key}_dys_{v}", ""), key=f"sr_{p_key}_dys_{v}", label_visibility="collapsed")
                 
-                pct_val = st.session_state.get(f"sr_{p_key}_pct", "")
+                pct_val = st.session_state.get(f"sr_{p_key}_pct_{v}", "")
                 if pct_val:
                     bar_img = generate_percentile_bar(pct_val)
                     if bar_img:
                         c5.image(bar_img, use_column_width=True)
                         c5.caption(f"{pct_val}%")
                 else:
-                    c5.text_input(f"{p_key} pct", value="", key=f"sr_{p_key}_pct_display", label_visibility="collapsed")
+                    c5.text_input(f"{p_key} pct", value="", key=f"sr_{p_key}_pct_display_{v}", label_visibility="collapsed")
 
             st.markdown("---")
             st.markdown("**Ratios & Averages**")
             b1, b2 = st.columns(2)
             
-            # Calculate ratios on the fly if we have the values
             try:
                 if data.get("fl_size") and data.get("hc_size"):
                     fl_hc_val = (float(data["fl_size"]) / float(data["hc_size"])) * 100
-                    st.session_state["sr_fl_hc"] = f"{fl_hc_val:.1f}%"
+                    st.session_state[f"sr_fl_hc_{v}"] = f"{fl_hc_val:.1f}%"
                 if data.get("hc_size") and data.get("ac_size"):
                     hc_ac_val = float(data["hc_size"]) / float(data["ac_size"])
-                    st.session_state["sr_hc_ac"] = f"{hc_ac_val:.2f}"
+                    st.session_state[f"sr_hc_ac_{v}"] = f"{hc_ac_val:.2f}"
                 if data.get("fl_size") and data.get("bpd_size"):
                     fl_bpd_val = (float(data["fl_size"]) / float(data["bpd_size"])) * 100
-                    st.session_state["sr_fl_bpd"] = f"{fl_bpd_val:.1f}%"
+                    st.session_state[f"sr_fl_bpd_{v}"] = f"{fl_bpd_val:.1f}%"
                 if data.get("fl_size") and data.get("ac_size"):
                     fl_ac_val = (float(data["fl_size"]) / float(data["ac_size"])) * 100
-                    st.session_state["sr_fl_ac"] = f"{fl_ac_val:.1f}%"
+                    st.session_state[f"sr_fl_ac_{v}"] = f"{fl_ac_val:.1f}%"
             except:
                 pass
 
-            data["fl_hc"] = b1.text_input("FL/HC", value=st.session_state.get("sr_fl_hc", ""))
-            data["hc_ac"] = b2.text_input("HC/AC", value=st.session_state.get("sr_hc_ac", ""))
+            data["fl_hc"] = b1.text_input("FL/HC", value=st.session_state.get(f"sr_fl_hc_{v}", ""), key=f"sr_fl_hc_{v}")
+            data["hc_ac"] = b2.text_input("HC/AC", value=st.session_state.get(f"sr_hc_ac_{v}", ""), key=f"sr_hc_ac_{v}")
             
             b1, b2 = st.columns(2)
-            data["fl_bpd"] = b1.text_input("FL/BPD", value=st.session_state.get("sr_fl_bpd", ""))
-            data["fl_ac"] = b2.text_input("FL/AC", value=st.session_state.get("sr_fl_ac", ""))
+            data["fl_bpd"] = b1.text_input("FL/BPD", value=st.session_state.get(f"sr_fl_bpd_{v}", ""), key=f"sr_fl_bpd_{v}")
+            data["fl_ac"] = b2.text_input("FL/AC", value=st.session_state.get(f"sr_fl_ac_{v}", ""), key=f"sr_fl_ac_{v}")
 
             b1, b2 = st.columns(2)
-            data["mean_age"] = b1.text_input("Mean Age", value=st.session_state.get("sr_mean_age", ""), key="sr_mean_age")
-            data["fetal_weight"] = b2.text_input("Fetal Weight (g)", value=st.session_state.get("sr_fetal_weight", ""), key="sr_fetal_weight")
+            data["mean_age"] = b1.text_input("Mean Age", value=st.session_state.get(f"sr_mean_age_{v}", ""), key=f"sr_mean_age_{v}")
+            data["fetal_weight"] = b2.text_input("Fetal Weight (g)", value=st.session_state.get(f"sr_fetal_weight_{v}", ""), key=f"sr_fetal_weight_{v}")
 
             b1, b2 = st.columns(2)
-            data["fhr"] = b1.text_input("FHR", value=st.session_state.get("sr_fhr", ""), key="sr_fhr")
-            data["edd_lmp"] = b2.text_input("EDD (LMP)", value=st.session_state.get("sr_edd_lmp", ""))
-            data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get("sr_edd_cua", ""))
+            data["fhr"] = b1.text_input("FHR", value=st.session_state.get(f"sr_fhr_{v}", ""), key=f"sr_fhr_{v}")
+            data["edd_lmp"] = b2.text_input("EDD (LMP)", value=st.session_state.get(f"sr_edd_lmp_{v}", ""), key=f"sr_edd_lmp_{v}")
+            data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get(f"sr_edd_cua_{v}", ""), key=f"sr_edd_cua_{v}")
             
             st.markdown("**Doppler Indices & Percentiles**")
             b1, b2, b3 = st.columns(3)
-            data["umbilical_pi"] = b1.text_input("Umbilical PI", value=st.session_state.get("sr_umbilical_pi", ""), key="sr_umbilical_pi")
-            data["mca_pi"] = b2.text_input("MCA PI", value="")
-            data["uterine_pi"] = b3.text_input("Mean Uterine PI", value=st.session_state.get("sr_uterine_pi", ""), key="sr_uterine_pi")
+            data["umbilical_pi"] = b1.text_input("Umbilical PI", value=st.session_state.get(f"sr_umbilical_pi_{v}", ""), key=f"sr_umbilical_pi_{v}")
+            data["mca_pi"] = b2.text_input("MCA PI", value="", key=f"sr_mca_pi_{v}")
+            data["uterine_pi"] = b3.text_input("Mean Uterine PI", value=st.session_state.get(f"sr_uterine_pi_{v}", ""), key=f"sr_uterine_pi_{v}")
 
             data["ga_weeks_dop"] = st.number_input("GA (weeks) for Percentiles", min_value=10.0, max_value=42.0, value=28.0, step=0.1)
 
