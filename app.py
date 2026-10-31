@@ -685,13 +685,19 @@ with col1:
             st.rerun()
             
     # Check for automated listener file (if no manual file was uploaded)
-    if uploaded_sr is None and os.path.exists('latest_sr.json'):
+    import os
+    import json
+    
+    # Use absolute path to ensure it finds the file regardless of where Streamlit is run from
+    json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'latest_sr.json')
+    
+    if uploaded_sr is None and os.path.exists(json_path):
         try:
-            with open('latest_sr.json', 'r') as f:
+            with open(json_path, 'r') as f:
                 st.session_state["sr_data"] = json.load(f)
             st.info("✅ Auto-loaded from DICOM Listener")
-        except:
-            pass
+        except Exception as e:
+            st.error(f"Error loading listener data: {e}")
             
     # Push values into session_state widgets
     sr_data = st.session_state.get("sr_data", {})
