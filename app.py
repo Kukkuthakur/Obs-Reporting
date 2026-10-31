@@ -668,6 +668,11 @@ with col1:
     import os
     
     st.markdown("### 🔗 DICOM Input")
+    
+    # Initialize the version bumper
+    if "dicom_version" not in st.session_state:
+        st.session_state["dicom_version"] = 0
+        
     col_up, col_ref = st.columns([2, 1])
     
     with col_up:
@@ -676,7 +681,9 @@ with col1:
             try:
                 ds = pydicom.dcmread(io.BytesIO(uploaded_sr.read()))
                 st.session_state["sr_data"] = extract_sr_data(ds)
-                st.success("DICOM SR File Loaded!")
+                st.session_state["dicom_version"] += 1  # Force refresh
+                st.session_state["last_json_mtime"] = None # Ignore old listener file
+                st.success("DICOM SR File Loaded (Manual)")
             except Exception as e:
                 st.error(f"Error reading SR: {e}")
                 
@@ -684,52 +691,58 @@ with col1:
         if st.button("🔄 Refresh from Listener", use_container_width=True):
             st.rerun()
             
-    # Check for automated listener file (if no manual file was uploaded)
-    import os
-    import json
-    
-    # Use absolute path to ensure it finds the file regardless of where Streamlit is run from
+    # Check for automated listener file
     json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'latest_sr.json')
     
     if uploaded_sr is None and os.path.exists(json_path):
         try:
-            with open(json_path, 'r') as f:
-                st.session_state["sr_data"] = json.load(f)
-            st.info("✅ Auto-loaded from DICOM Listener")
+            mtime = os.path.getmtime(json_path)
+            
+            # If the file is new
+            if st.session_state.get("last_json_mtime") != mtime:
+                with open(json_path, 'r') as f:
+                    st.session_state["sr_data"] = json.load(f)
+                st.session_state["last_json_mtime"] = mtime
+                st.session_state["dicom_version"] += 1  # Force refresh
+                st.success("✅ Loaded fresh data from DICOM Listener!")
+            else:
+                st.info("✅ Listener data is up to date.")
+                
         except Exception as e:
             st.error(f"Error loading listener data: {e}")
             
-    # Push values into session_state widgets
+    # Push values into session_state widgets with versioning
     sr_data = st.session_state.get("sr_data", {})
+    v = st.session_state["dicom_version"]
     
-    if 'bpd' in sr_data: st.session_state["sr_bpd_size"] = sr_data['bpd']
-    if 'hc' in sr_data: st.session_state["sr_hc_size"] = sr_data['hc']
-    if 'ac' in sr_data: st.session_state["sr_ac_size"] = sr_data['ac']
-    if 'fl' in sr_data: st.session_state["sr_fl_size"] = sr_data['fl']
-    if 'hl' in sr_data: st.session_state["sr_hl_size"] = sr_data['hl']
+    if 'bpd' in sr_data: st.session_state[f"sr_bpd_size_{v}"] = sr_data['bpd']
+    if 'hc' in sr_data: st.session_state[f"sr_hc_size_{v}"] = sr_data['hc']
+    if 'ac' in sr_data: st.session_state[f"sr_ac_size_{v}"] = sr_data['ac']
+    if 'fl' in sr_data: st.session_state[f"sr_fl_size_{v}"] = sr_data['fl']
+    if 'hl' in sr_data: st.session_state[f"sr_hl_size_{v}"] = sr_data['hl']
     
     for p in ["bpd", "hc", "ac", "fl", "hl"]:
-        if f"{p}_wks" in sr_data: st.session_state[f"sr_{p}_wks"] = sr_data[f"{p}_wks"]
-        if f"{p}_dys" in sr_data: st.session_state[f"sr_{p}_dys"] = sr_data[f"{p}_dys"]
-        if f"{p}_pct" in sr_data: st.session_state[f"sr_{p}_pct"] = sr_data[f"{p}_pct"]
+        if f"{p}_wks" in sr_data: st.session_state[f"sr_{p}_wks_{v}"] = sr_data[f"{p}_wks"]
+        if f"{p}_dys" in sr_data: st.session_state[f"sr_{p}_dys_{v}"] = sr_data[f"{p}_dys"]
+        if f"{p}_pct" in sr_data: st.session_state[f"sr_{p}_pct_{v}"] = sr_data[f"{p}_pct"]
 
-    if 'msd' in sr_data: st.session_state["sr_msd"] = sr_data['msd']
-    if 'crl' in sr_data: st.session_state["sr_crl"] = sr_data['crl']
-    if 'nt' in sr_data: st.session_state["sr_nt"] = sr_data['nt']
-    if 'nasal_bone' in sr_data: st.session_state["sr_nasal_bone"] = sr_data['nasal_bone']
-    if 'fetal_weight' in sr_data: st.session_state["sr_fetal_weight"] = sr_data['fetal_weight']
-    if 'fhr' in sr_data: st.session_state["sr_fhr"] = sr_data['fhr']
-    if 'mean_age' in sr_data: st.session_state["sr_mean_age"] = sr_data['mean_age']
+    if 'msd' in sr_data: st.session_state[f"sr_msd_{v}"] = sr_data['msd']
+    if 'crl' in sr_data: st.session_state[f"sr_crl_{v}"] = sr_data['crl']
+    if 'nt' in sr_data: st.session_state[f"sr_nt_{v}"] = sr_data['nt']
+    if 'nasal_bone' in sr_data: st.session_state[f"sr_nasal_bone_{v}"] = sr_data['nasal_bone']
+    if 'fetal_weight' in sr_data: st.session_state[f"sr_fetal_weight_{v}"] = sr_data['fetal_weight']
+    if 'fhr' in sr_data: st.session_state[f"sr_fhr_{v}"] = sr_data['fhr']
+    if 'mean_age' in sr_data: st.session_state[f"sr_mean_age_{v}"] = sr_data['mean_age']
     
-    if 'edd_lmp' in sr_data: st.session_state["sr_edd_lmp"] = sr_data['edd_lmp']
-    if 'edd_cua' in sr_data: st.session_state["sr_edd_cua"] = sr_data['edd_cua']
-    if 'lmp' in sr_data: st.session_state["sr_lmp"] = sr_data['lmp']
+    if 'edd_lmp' in sr_data: st.session_state[f"sr_edd_lmp_{v}"] = sr_data['edd_lmp']
+    if 'edd_cua' in sr_data: st.session_state[f"sr_edd_cua_{v}"] = sr_data['edd_cua']
+    if 'lmp' in sr_data: st.session_state[f"sr_lmp_{v}"] = sr_data['lmp']
     
     if 'ga_lmp_days' in sr_data: 
-        st.session_state["sr_ga_lmp"] = f"{sr_data['ga_lmp_days']//7}w{sr_data['ga_lmp_days']%7}d"
+        st.session_state[f"sr_ga_lmp_{v}"] = f"{sr_data['ga_lmp_days']//7}w{sr_data['ga_lmp_days']%7}d"
 
-    if 'umbilical_pi' in sr_data: st.session_state["sr_umbilical_pi"] = sr_data['umbilical_pi']
-    if 'uterine_pi' in sr_data: st.session_state["sr_uterine_pi"] = sr_data['uterine_pi']
+    if 'umbilical_pi' in sr_data: st.session_state[f"sr_umbilical_pi_{v}"] = sr_data['umbilical_pi']
+    if 'uterine_pi' in sr_data: st.session_state[f"sr_uterine_pi_{v}"] = sr_data['uterine_pi']
     # --------------------------
     lmp_not_sure = st.checkbox("LMP Not Sure / Not Known")
     if lmp_not_sure:
