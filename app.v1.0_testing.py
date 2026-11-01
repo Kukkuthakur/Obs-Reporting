@@ -11,6 +11,35 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 import pydicom
+import matplotlib.pyplot as plt
+import numpy as np
+
+def generate_percentile_bar(percentile):
+    """Generates a small PNG image of a percentile bar."""
+    if not percentile:
+        return None
+    
+    try:
+        pct = float(percentile)
+    except:
+        return None
+
+    fig, ax = plt.subplots(figsize=(3, 0.4))
+    fig.patch.set_alpha(0)
+    
+    ax.plot([0, 100], [0, 0], color='lightgray', linewidth=4, zorder=1)
+    ax.plot([10, 90], [0, 0], color='#4CAF50', linewidth=4, zorder=2)
+    ax.scatter(pct, 0, color='#D32F2F', s=80, zorder=3, edgecolors='black')
+    
+    ax.set_xlim(0, 100)
+    ax.set_ylim(-0.5, 0.5)
+    ax.axis('off')
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", bbox_inches='tight', transparent=True, dpi=200)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
 
 # ============================================================
 # BARCELONA / FMF Z-SCORE CALCULATOR
@@ -55,34 +84,37 @@ def calculate_uta_pi(pi: float, ga_weeks: int):
     elif pi >= p95: pct = 95.0
     elif pi <= p50: pct = 5.0 + 45.0 * (pi - p5) / (p50 - p5)
     else: pct = 50.0 + 45.0 * (pi - p50) / (p95 - p50)
-    z = math.sqrt(2) * math.erfinv(2 * (pct / 100.0) - 1)
-    return {"z_score": round(z, 2), "percentile": round(pct, 1)}
+    return {"z_score": 0.0, "percentile": round(pct, 1)}
 
 # ============================================================
 # DICOM SR PARSER
 # ============================================================
 def extract_sr_data(ds):
+    from datetime import datetime, timedelta
     extracted = {}
-    def walk_tree(seq, parent_concept=""):
+    
+    def walk_tree(seq, current_site=""):
         for item in seq:
             concept = ""
             if 'ConceptNameCodeSequence' in item:
                 concept = item.ConceptNameCodeSequence[0].get('CodeMeaning', '')
             
-            # Grab Text Values (EDDs)
+            new_site = current_site
+            if concept in ["Umbilical Artery", "Uterine Artery"]:
+                new_site = concept
+
             if item.ValueType == 'TEXT':
                 val = item.get('TextValue', '')
-                if concept == 'EDD from average ultrasound age': extracted['edd_cua'] = val
-                if concept == 'EDD from LMP': extracted['edd_lmp'] = val
-                if concept == 'LMP': extracted['lmp'] = val
+                if val: 
+                    if concept == 'EDD from average ultrasound age': extracted['edd_cua'] = val
+                    if concept == 'EDD from LMP': extracted['edd_lmp'] = val
+                    if concept == 'LMP': extracted['lmp'] = val
 
-            # Grab Numeric Values
             if item.ValueType == 'NUM' and 'MeasuredValueSequence' in item:
                 val_seq = item.MeasuredValueSequence[0]
                 num_val = float(val_seq.get('NumericValue', 0))
                 unit = val_seq.get('MeasurementUnitsCodeSequence', [{}])[0].get('CodeMeaning', '')
                 
-                # --- BIOMETRY (cm to mm) ---
                 if unit == 'centimeter':
                     if concept == 'Biparietal Diameter': extracted['bpd'] = f"{int(num_val * 10)}"
                     elif concept == 'Head Circumference': extracted['hc'] = f"{int(num_val * 10)}"
@@ -91,28 +123,36 @@ def extract_sr_data(ds):
                     elif concept == 'Humerus length': extracted['hl'] = f"{int(num_val * 10)}"
                     elif concept == 'Gestational Sac Diameter': extracted['msd'] = f"{int(num_val * 10)}"
                     elif concept == 'Crown Rump Length': extracted['crl'] = f"{int(num_val * 10)}"
+                    elif concept == 'Nuchal Translucency': extracted['nt'] = f"{int(num_val * 10)}"
+
+                if concept == 'Nasal Bone':
+                    extracted['nasal_bone'] = "Present" if num_val > 0 else "Absent"
                 
-                # --- DOPPLER ---
-                if 'Umbilical Artery' in parent_concept and concept == 'Pulsatility Index':
+                if new_site == "Umbilical Artery" and concept == 'Pulsatility Index':
                     extracted['umbilical_pi'] = str(num_val)
-                if 'Uterine Artery' in parent_concept and concept == 'Pulsatility Index':
+                if new_site == "Uterine Artery" and concept == 'Pulsatility Index':
                     extracted['uterine_pi'] = str(num_val)
                 
-                # --- GENERAL ---
                 if concept == 'Estimated Weight': extracted['fetal_weight'] = str(int(num_val))
                 if concept == 'Fetal Heart Rate': extracted['fhr'] = str(int(num_val))
+                
                 if concept == 'Composite Ultrasound Age': 
-                    extracted['ga_days'] = str(int(num_val))
+                    extracted['ga_usg_days'] = int(num_val)
                     extracted['mean_age'] = f"{int(num_val)//7}weeks {int(num_val)%7}days ± 2w"
                 
-                # --- GESTATIONAL AGES ---
-                if concept == 'Gestational Age':
-                    wks = int(num_val) // 7
-                    dys = int(num_val) % 7
+                if concept == 'Gestational Age by LMP':
+                    extracted['ga_lmp_days'] = int(num_val)
+
+                if concept == 'Growth Percentile Rank':
                     if 'current_param' in extracted:
                         param = extracted['current_param']
-                        extracted[f"{param}_wks"] = str(wks)
-                        extracted[f"{param}_dys"] = str(dys)
+                        extracted[f"{param}_pct"] = str(num_val)
+
+                if concept == 'Gestational Age':
+                    if 'current_param' in extracted:
+                        param = extracted['current_param']
+                        extracted[f"{param}_wks"] = str(int(num_val) // 7)
+                        extracted[f"{param}_dys"] = str(int(num_val) % 7)
 
             if concept in ['Biparietal Diameter', 'Head Circumference', 'Abdominal Circumference', 'Femur Length', 'Humerus length']:
                 param_map = {
@@ -122,8 +162,7 @@ def extract_sr_data(ds):
                 extracted['current_param'] = param_map[concept]
             
             if 'ContentSequence' in item:
-                new_parent = concept if concept in ["Umbilical Artery", "Uterine Artery"] else parent_concept
-                walk_tree(item.ContentSequence, new_parent)
+                walk_tree(item.ContentSequence, new_site)
             
             if concept == 'Biometry Group':
                 extracted.pop('current_param', None)
@@ -132,6 +171,15 @@ def extract_sr_data(ds):
         walk_tree(ds.ContentSequence)
         
     extracted.pop('current_param', None)
+    
+    today = datetime.now()
+    if 'lmp' not in extracted and 'ga_lmp_days' in extracted:
+        extracted['lmp'] = (today - timedelta(days=extracted['ga_lmp_days'])).strftime("%d-%m-%Y")
+    if 'edd_lmp' not in extracted and 'ga_lmp_days' in extracted:
+        extracted['edd_lmp'] = (today + timedelta(days=(280 - extracted['ga_lmp_days']))).strftime("%d-%m-%Y")
+    if 'edd_cua' not in extracted and 'ga_usg_days' in extracted:
+        extracted['edd_cua'] = (today + timedelta(days=(280 - extracted['ga_usg_days']))).strftime("%d-%m-%Y")
+
     return extracted
 
 # ============================================================
@@ -184,10 +232,7 @@ def generate_afi_text(afi_val, is_total=True):
         val = float(afi_val)
     except (ValueError, TypeError):
         return "Adequate", False
-
-    if not is_total:
-        return "", False 
-
+    if not is_total: return "", False 
     if val == 0: return "Nil, Not a single pocket of even one cm seen", True
     elif 0 < val < 4: return "Moderate to severe oligohydramnios", True
     elif 4 <= val < 6: return "Mild to moderate oligohydramnios", True
@@ -276,6 +321,41 @@ def build_docx_bytes(data, template_id):
             add_run(edd_table.cell(i, 1).paragraphs[0], date, size=10)
             add_run(edd_table.cell(i, 2).paragraphs[0], err, size=10)
 
+    # 3.5 NT_NB SCAN
+    elif template_id == "NT_NB":
+        nt_table = doc.add_table(rows=4, cols=4)
+        set_table_borders(nt_table)
+        for row in nt_table.rows:
+            row.cells[0].width = Cm(4.0); row.cells[1].width = Cm(4.0); row.cells[2].width = Cm(4.0); row.cells[3].width = Cm(4.0)
+            
+        nt_data = [
+            ("CRL", f"{data.get('crl', '')}mm", "NT", f"{data.get('nt', '')}mm"),
+            ("Nasal Bone", data.get('nasal_bone', ''), "FHR", f"{data.get('fhr_val', '')} bpm"),
+            ("DV PI", data.get('dv_pi', ''), "DV A-Wave", data.get('dv_awave', '')),
+            ("Placenta", data.get('placenta_pos', ''), "Cervix", f"{data.get('cervix', '')}cm"),
+        ]
+        
+        for i, (l1, v1, l2, v2) in enumerate(nt_data):
+            add_run(nt_table.cell(i, 0).paragraphs[0], l1, bold=True, size=10)
+            add_run(nt_table.cell(i, 1).paragraphs[0], v1, italic=True, size=10)
+            add_run(nt_table.cell(i, 2).paragraphs[0], l2, bold=True, size=10)
+            add_run(nt_table.cell(i, 3).paragraphs[0], v2, italic=True, size=10)
+            
+        doc.add_paragraph()
+        
+        edd_table = doc.add_table(rows=2, cols=3)
+        set_table_borders(edd_table)
+        for row in edd_table.rows:
+            row.cells[0].width = Cm(3.5); row.cells[1].width = Cm(5.0); row.cells[2].width = Cm(3.0)
+        edd_data = [
+            ("EDD (LMP)--", data.get('edd_lmp', '') if data.get('lmp') != "Not Sure" else "-", "±2W"),
+            ("EDD (CUA)--", data.get('edd_cua', ''), "±2W"),
+        ]
+        for i, (label, date, err) in enumerate(edd_data):
+            add_run(edd_table.cell(i, 0).paragraphs[0], label, bold=True, italic=True, size=10)
+            add_run(edd_table.cell(i, 1).paragraphs[0], date, italic=True, size=10)
+            add_run(edd_table.cell(i, 2).paragraphs[0], err, italic=True, size=10)
+
     # 4. STANDARD OB
     else:
         p = doc.add_paragraph()
@@ -289,10 +369,10 @@ def build_docx_bytes(data, template_id):
         add_run(bio_head, "BIO PHYSICAL PARAMETERS:", bold=True, underline=True)
         bio_head.paragraph_format.space_after = Pt(6)
 
-        bio_table = doc.add_table(rows=5, cols=4)
+        bio_table = doc.add_table(rows=5, cols=5)
         set_table_borders(bio_table)
         for row in bio_table.rows:
-            row.cells[0].width = Cm(3.5); row.cells[1].width = Cm(4.0); row.cells[2].width = Cm(4.5); row.cells[3].width = Cm(4.5)
+            row.cells[0].width = Cm(3.5); row.cells[1].width = Cm(2.5); row.cells[2].width = Cm(2.5); row.cells[3].width = Cm(2.5); row.cells[4].width = Cm(5.0)
         params = ["bpd", "hc", "ac", "fl", "hl"]
         for i, param in enumerate(params):
             size = data.get(f"{param}_size", ""); wks = data.get(f"{param}_wks", ""); dys = data.get(f"{param}_dys", "")
@@ -300,6 +380,21 @@ def build_docx_bytes(data, template_id):
             add_run(bio_table.cell(i, 1).paragraphs[0], f"{size}mm" if size else "", italic=True, size=10)
             add_run(bio_table.cell(i, 2).paragraphs[0], f"{wks}weeks" if wks else "", italic=True, size=10)
             add_run(bio_table.cell(i, 3).paragraphs[0], f"{dys}days±2w" if dys else "", italic=True, size=10)
+            
+            pct_val = data.get(f"{param}_pct", "")
+            if pct_val:
+                bar_img = generate_percentile_bar(pct_val)
+                if bar_img:
+                    cell = bio_table.cell(i, 4)
+                    p_img = cell.paragraphs[0]
+                    p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    run = p_img.add_run()
+                    run.add_picture(bar_img, width=Cm(3.5))
+                    
+                    p_txt = cell.add_paragraph(f"{pct_val}%")
+                    p_txt.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    if p_txt.runs:
+                        p_txt.runs[0].font.size = Pt(8)
         doc.add_paragraph()
 
         ratio_table = doc.add_table(rows=1, cols=2)
@@ -383,6 +478,8 @@ def build_docx_bytes(data, template_id):
             imp_text = f"Intra uterine pregnancy of {data.get('ga_crl', '')} +/-1w with not yet appreciable cardiac activity. Adv- Review scan after 2 weeks."
         else:
             imp_text = f"Intra uterine live pregnancy of {data.get('ga_crl', '')} +/-1w with good cardiac activity."
+    elif template_id == "NT_NB":
+        imp_text = f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
     else:
         imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {data.get('presentation', 'variable').lower()} presentation of approx. {mean_age} gestation age."
     p = doc.add_paragraph(); add_run(p, imp_text, bold=True, italic=True)
@@ -430,6 +527,20 @@ def render_ob_preview(data, template_id):
         lines.append("")
         lines.append(f"  {'EDD (LMP)':<20}: {data.get('edd_lmp', '') if data.get('lmp') != 'Not Sure' else '-'}    ±2W")
         lines.append(f"  {'EDD (CUA)':<20}: {data.get('edd_cua', '')}    ±2W")
+
+    elif template_id == "NT_NB":
+        lines.append("NT / NB SCAN DETAILS:")
+        lines.append(f"  CRL: {data.get('crl', '')}mm")
+        lines.append(f"  NT: {data.get('nt', '')}mm")
+        lines.append(f"  Nasal Bone: {data.get('nasal_bone', '')}")
+        lines.append(f"  FHR: {data.get('fhr_val', '')} bpm")
+        lines.append(f"  DV PI: {data.get('dv_pi', '')} (A-wave: {data.get('dv_awave', '')})")
+        lines.append("")
+        lines.append(f"  Placenta: {data.get('placenta_pos', '')}")
+        lines.append(f"  Cervix: {data.get('cervix', '')}cm")
+        lines.append("")
+        lines.append(f"  EDD (LMP): {data.get('edd_lmp', '')}")
+        lines.append(f"  EDD (CUA): {data.get('edd_cua', '')}")
 
     else:
         lines.append(f"Uterus shows single live fetus. Fetus is in {data.get('presentation', 'variable').lower()} presentation at the time of scanning. Fetal movements are present. Fetal cardiac pulsations are appreciated.")
@@ -486,6 +597,8 @@ def render_ob_preview(data, template_id):
             imp_text = f"Intra uterine pregnancy of {data.get('ga_crl', '')} +/-1w with not yet appreciable cardiac activity. Adv- Review scan after 2 weeks."
         else:
             imp_text = f"Intra uterine live pregnancy of {data.get('ga_crl', '')} +/-1w with good cardiac activity."
+    elif template_id == "NT_NB":
+        imp_text = f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
     else:
         imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {data.get('presentation', 'variable').lower()} presentation of approx. {mean_age} gestation age."
     lines.append(f"  - {imp_text}")
@@ -547,44 +660,94 @@ data = {"patient_name": p_name, "patient_age": p_age, "report_date": p_date, "re
 col1, col2 = st.columns([1, 1], gap="large")
 
 with col1:
-    template_id = st.selectbox("Template", ["EARLY_OBS", "T16", "T3"])
+    template_id = st.selectbox("Template", ["EARLY_OBS", "NT_NB", "T16", "T3"])
     
-    # --- DICOM UPLOADER ---
-    uploaded_sr = st.file_uploader("🔗 Auto-Fill from DICOM SR", type=["dcm", "dicom", "ima", ""])
-    if uploaded_sr is not None:
+    # --- DUAL DICOM INPUT (Manual Upload + Listener) ---
+    import json
+    import os
+    
+    st.markdown("### 🔗 DICOM Input")
+    
+    # Initialize the version bumper
+    if "dicom_version" not in st.session_state:
+        st.session_state["dicom_version"] = 0
+        
+    col_up, col_ref = st.columns([2, 1])
+    
+    with col_up:
+        uploaded_sr = st.file_uploader("Auto-Fill from File", type=["dcm", "dicom", "ima", "json"], label_visibility="collapsed")
+        if uploaded_sr is not None:
+            try:
+                if uploaded_sr.name.endswith('.json'):
+                    st.session_state["sr_data"] = json.load(uploaded_sr)
+                else:
+                    ds = pydicom.dcmread(io.BytesIO(uploaded_sr.read()))
+                    st.session_state["sr_data"] = extract_sr_data(ds)
+                st.session_state["sr_data"] = extract_sr_data(ds)
+                st.session_state["dicom_version"] += 1  # Force refresh
+                st.session_state["last_json_mtime"] = None # Ignore old listener file
+                st.success("DICOM SR File Loaded (Manual)")
+            except Exception as e:
+                st.error(f"Error reading SR: {e}")
+                
+    with col_ref:
+        if st.button("🔄 Refresh from Listener", use_container_width=True):
+            st.session_state["last_json_mtime"] = None  # Forces the app to look at the file again
+            st.rerun()
+            
+    # Check for automated listener file
+    json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'latest_sr.json')
+    
+    if uploaded_sr is None and os.path.exists(json_path):
         try:
-            ds = pydicom.dcmread(io.BytesIO(uploaded_sr.read()))
-            sr_data = extract_sr_data(ds)
+            mtime = os.path.getmtime(json_path)
             
-            # Push values into session_state
-            if 'bpd' in sr_data: st.session_state["sr_bpd_size"] = sr_data['bpd']
-            if 'hc' in sr_data: st.session_state["sr_hc_size"] = sr_data['hc']
-            if 'ac' in sr_data: st.session_state["sr_ac_size"] = sr_data['ac']
-            if 'fl' in sr_data: st.session_state["sr_fl_size"] = sr_data['fl']
-            if 'hl' in sr_data: st.session_state["sr_hl_size"] = sr_data['hl']
-            
-            for p in ["bpd", "hc", "ac", "fl", "hl"]:
-                if f"{p}_wks" in sr_data: st.session_state[f"sr_{p}_wks"] = sr_data[f"{p}_wks"]
-                if f"{p}_dys" in sr_data: st.session_state[f"sr_{p}_dys"] = sr_data[f"{p}_dys"]
-
-            if 'msd' in sr_data: st.session_state["sr_msd"] = sr_data['msd']
-            if 'crl' in sr_data: st.session_state["sr_crl"] = sr_data['crl']
-            if 'fetal_weight' in sr_data: st.session_state["sr_fetal_weight"] = sr_data['fetal_weight']
-            if 'fhr' in sr_data: st.session_state["sr_fhr"] = sr_data['fhr']
-            if 'mean_age' in sr_data: st.session_state["sr_mean_age"] = sr_data['mean_age']
-            
-            if 'edd_lmp' in sr_data: st.session_state["sr_edd_lmp"] = sr_data['edd_lmp']
-            if 'edd_cua' in sr_data: st.session_state["sr_edd_cua"] = sr_data['edd_cua']
-            if 'lmp' in sr_data: st.session_state["sr_lmp"] = sr_data['lmp']
-            
-            if 'umbilical_pi' in sr_data: st.session_state["sr_umbilical_pi"] = sr_data['umbilical_pi']
-            if 'uterine_pi' in sr_data: st.session_state["sr_uterine_pi"] = sr_data['uterine_pi']
-            
-            st.success("DICOM SR Loaded!")
+            # If the file is new
+            if st.session_state.get("last_json_mtime") != mtime:
+                with open(json_path, 'r') as f:
+                    st.session_state["sr_data"] = json.load(f)
+                st.session_state["last_json_mtime"] = mtime
+                st.session_state["dicom_version"] += 1  # Force refresh
+                st.success("✅ Loaded fresh data from DICOM Listener!")
+            else:
+                st.info("✅ Listener data is up to date.")
+                
         except Exception as e:
-            st.error(f"Error reading SR: {e}")
-    # --------------------------
+            st.error(f"Error loading listener data: {e}")
+            
+    # Push values into session_state widgets with versioning
+    sr_data = st.session_state.get("sr_data", {})
+    v = st.session_state["dicom_version"]
+    
+    if 'bpd' in sr_data: st.session_state[f"sr_bpd_size_{v}"] = sr_data['bpd']
+    if 'hc' in sr_data: st.session_state[f"sr_hc_size_{v}"] = sr_data['hc']
+    if 'ac' in sr_data: st.session_state[f"sr_ac_size_{v}"] = sr_data['ac']
+    if 'fl' in sr_data: st.session_state[f"sr_fl_size_{v}"] = sr_data['fl']
+    if 'hl' in sr_data: st.session_state[f"sr_hl_size_{v}"] = sr_data['hl']
+    
+    for p in ["bpd", "hc", "ac", "fl", "hl"]:
+        if f"{p}_wks" in sr_data: st.session_state[f"sr_{p}_wks_{v}"] = sr_data[f"{p}_wks"]
+        if f"{p}_dys" in sr_data: st.session_state[f"sr_{p}_dys_{v}"] = sr_data[f"{p}_dys"]
+        if f"{p}_pct" in sr_data: st.session_state[f"sr_{p}_pct_{v}"] = sr_data[f"{p}_pct"]
 
+    if 'msd' in sr_data: st.session_state[f"sr_msd_{v}"] = sr_data['msd']
+    if 'crl' in sr_data: st.session_state[f"sr_crl_{v}"] = sr_data['crl']
+    if 'nt' in sr_data: st.session_state[f"sr_nt_{v}"] = sr_data['nt']
+    if 'nasal_bone' in sr_data: st.session_state[f"sr_nasal_bone_{v}"] = sr_data['nasal_bone']
+    if 'fetal_weight' in sr_data: st.session_state[f"sr_fetal_weight_{v}"] = sr_data['fetal_weight']
+    if 'fhr' in sr_data: st.session_state[f"sr_fhr_{v}"] = sr_data['fhr']
+    if 'mean_age' in sr_data: st.session_state[f"sr_mean_age_{v}"] = sr_data['mean_age']
+    
+    if 'edd_lmp' in sr_data: st.session_state[f"sr_edd_lmp_{v}"] = sr_data['edd_lmp']
+    if 'edd_cua' in sr_data: st.session_state[f"sr_edd_cua_{v}"] = sr_data['edd_cua']
+    if 'lmp' in sr_data: st.session_state[f"sr_lmp_{v}"] = sr_data['lmp']
+    
+    if 'ga_lmp_days' in sr_data: 
+        st.session_state[f"sr_ga_lmp_{v}"] = f"{sr_data['ga_lmp_days']//7}w{sr_data['ga_lmp_days']%7}d"
+
+    if 'umbilical_pi' in sr_data: st.session_state[f"sr_umbilical_pi_{v}"] = sr_data['umbilical_pi']
+    if 'uterine_pi' in sr_data: st.session_state[f"sr_uterine_pi_{v}"] = sr_data['uterine_pi']
+    # --------------------------
     lmp_not_sure = st.checkbox("LMP Not Sure / Not Known")
     if lmp_not_sure:
         data["lmp"] = "Not Sure"
@@ -593,63 +756,111 @@ with col1:
 
     with st.expander("🔗 DICOM SR Data (Machine Generated)", expanded=False):
         st.markdown('<div class="dicom-box">Verify or override data received from the ultrasound machine.</div>', unsafe_allow_html=True)
+        
+        v = st.session_state.get("dicom_version", 0)
+
+        if template_id != "EARLY_OBS":
+            # Timeline Header
+            st.markdown(f"**LMP:** {st.session_state.get(f'sr_lmp_{v}', '')} &nbsp;|&nbsp; "
+                        f"**GA(LMP):** {st.session_state.get(f'sr_ga_lmp_{v}', '')} &nbsp;|&nbsp; "
+                        f"**AUA:** {st.session_state.get(f'sr_mean_age_{v}', '')} &nbsp;|&nbsp; "
+                        f"**EDD(LMP):** {st.session_state.get(f'sr_edd_lmp_{v}', '')}")
+            st.markdown("---")
+
         if template_id == "EARLY_OBS":
-            data["gsac"] = st.text_input("G-Sac", value=st.session_state.get("sr_gsac", "Seen"), key="sr_gsac")
-            data["msd"] = st.text_input("MSD", value=st.session_state.get("sr_msd", ""), key="sr_msd")
-            data["crl"] = st.text_input("CRL", value=st.session_state.get("sr_crl", ""), key="sr_crl")
+            data["gsac"] = st.text_input("G-Sac", value=st.session_state.get(f"sr_gsac_{v}", "Seen"), key=f"sr_gsac_{v}")
+            data["msd"] = st.text_input("MSD", value=st.session_state.get(f"sr_msd_{v}", ""), key=f"sr_msd_{v}")
+            data["crl"] = st.text_input("CRL", value=st.session_state.get(f"sr_crl_{v}", ""), key=f"sr_crl_{v}")
             data["ga_crl"] = st.text_input("GA by CRL", value="")
             data["yolk"] = st.text_input("Yolk sac", value="")
-            data["edd_lmp"] = st.text_input("EDD (LMP)", value=st.session_state.get("sr_edd_lmp", ""))
-            data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get("sr_edd_cua", ""))
+            data["edd_lmp"] = st.text_input("EDD (LMP)", value=st.session_state.get(f"sr_edd_lmp_{v}", ""), key=f"sr_edd_lmp_{v}")
+            data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get(f"sr_edd_cua_{v}", ""), key=f"sr_edd_cua_{v}")
+        elif template_id == "NT_NB":
+            b1, b2 = st.columns(2)
+            data["crl"] = b1.text_input("CRL (mm)", value=st.session_state.get(f"sr_crl_{v}", ""), key=f"sr_crl_{v}")
+            data["nt"] = b2.text_input("NT (mm)", value=st.session_state.get(f"sr_nt_{v}", ""), key=f"sr_nt_{v}")
+            
+            b1, b2 = st.columns(2)
+            data["nasal_bone"] = b1.text_input("Nasal Bone", value=st.session_state.get(f"sr_nasal_bone_{v}", ""), key=f"sr_nasal_bone_{v}")
+            data["fhr_val"] = b2.text_input("FHR (bpm)", value=st.session_state.get(f"sr_fhr_{v}", ""), key=f"sr_fhr_{v}")
+            
+            data["edd_lmp"] = st.text_input("EDD (LMP)", value=st.session_state.get(f"sr_edd_lmp_{v}", ""), key=f"sr_edd_lmp_{v}")
+            data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get(f"sr_edd_cua_{v}", ""), key=f"sr_edd_cua_{v}")
         else:
-            for param in ["bpd", "hc", "ac", "fl", "hl"]:
-                b1, b2, b3 = st.columns(3)
-                data[f"{param}_size"] = b1.text_input(f"{param.upper()} Size", value=st.session_state.get(f"sr_{param}_size", ""), key=f"sr_{param}_size")
-                data[f"{param}_wks"] = b2.text_input(f"{param.upper()} Wks", value=st.session_state.get(f"sr_{param}_wks", ""), key=f"sr_{param}_wks")
-                data[f"{param}_dys"] = b3.text_input(f"{param.upper()} Days", value=st.session_state.get(f"sr_{param}_dys", ""), key=f"sr_{param}_dys")
+            st.markdown("**Fetal Growth Parameters**")
+            h1, h2, h3, h4, h5 = st.columns([2, 1, 1, 1, 3])
+            h1.caption("Parameter")
+            h2.caption("Size (mm)")
+            h3.caption("Wks")
+            h4.caption("Days")
+            h5.caption("Percentile")
 
-            # Ratios & Averages
+            params = [
+                ("bpd", "Biparietal Diameter"),
+                ("hc", "Head Circumference"),
+                ("ac", "Abdominal Circumference"),
+                ("fl", "Femur Length"),
+                ("hl", "Humerus Length")
+            ]
+
+            for p_key, p_name in params:
+                c1, c2, c3, c4, c5 = st.columns([2, 1, 1, 1, 3])
+                c1.markdown(f"**{p_name}**")
+                
+                data[f"{p_key}_size"] = c2.text_input(f"{p_key} size", value=st.session_state.get(f"sr_{p_key}_size_{v}", ""), key=f"sr_{p_key}_size_{v}", label_visibility="collapsed")
+                data[f"{p_key}_wks"] = c3.text_input(f"{p_key} wks", value=st.session_state.get(f"sr_{p_key}_wks_{v}", ""), key=f"sr_{p_key}_wks_{v}", label_visibility="collapsed")
+                data[f"{p_key}_dys"] = c4.text_input(f"{p_key} dys", value=st.session_state.get(f"sr_{p_key}_dys_{v}", ""), key=f"sr_{p_key}_dys_{v}", label_visibility="collapsed")
+                
+                pct_val = st.session_state.get(f"sr_{p_key}_pct_{v}", "")
+                if pct_val:
+                    bar_img = generate_percentile_bar(pct_val)
+                    if bar_img:
+                        c5.image(bar_img, use_column_width=True)
+                        c5.caption(f"{pct_val}%")
+                else:
+                    c5.text_input(f"{p_key} pct", value="", key=f"sr_{p_key}_pct_display_{v}", label_visibility="collapsed")
+
+            st.markdown("---")
             st.markdown("**Ratios & Averages**")
             b1, b2 = st.columns(2)
             
-            # Calculate ratios on the fly if we have the values
             try:
                 if data.get("fl_size") and data.get("hc_size"):
                     fl_hc_val = (float(data["fl_size"]) / float(data["hc_size"])) * 100
-                    st.session_state["sr_fl_hc"] = f"{fl_hc_val:.1f}%"
+                    st.session_state[f"sr_fl_hc_{v}"] = f"{fl_hc_val:.1f}%"
                 if data.get("hc_size") and data.get("ac_size"):
                     hc_ac_val = float(data["hc_size"]) / float(data["ac_size"])
-                    st.session_state["sr_hc_ac"] = f"{hc_ac_val:.2f}"
+                    st.session_state[f"sr_hc_ac_{v}"] = f"{hc_ac_val:.2f}"
                 if data.get("fl_size") and data.get("bpd_size"):
                     fl_bpd_val = (float(data["fl_size"]) / float(data["bpd_size"])) * 100
-                    st.session_state["sr_fl_bpd"] = f"{fl_bpd_val:.1f}%"
+                    st.session_state[f"sr_fl_bpd_{v}"] = f"{fl_bpd_val:.1f}%"
                 if data.get("fl_size") and data.get("ac_size"):
                     fl_ac_val = (float(data["fl_size"]) / float(data["ac_size"])) * 100
-                    st.session_state["sr_fl_ac"] = f"{fl_ac_val:.1f}%"
+                    st.session_state[f"sr_fl_ac_{v}"] = f"{fl_ac_val:.1f}%"
             except:
                 pass
 
-            data["fl_hc"] = b1.text_input("FL/HC", value=st.session_state.get("sr_fl_hc", ""))
-            data["hc_ac"] = b2.text_input("HC/AC", value=st.session_state.get("sr_hc_ac", ""))
+            data["fl_hc"] = b1.text_input("FL/HC", value=st.session_state.get(f"sr_fl_hc_{v}", ""), key=f"sr_fl_hc_{v}")
+            data["hc_ac"] = b2.text_input("HC/AC", value=st.session_state.get(f"sr_hc_ac_{v}", ""), key=f"sr_hc_ac_{v}")
             
             b1, b2 = st.columns(2)
-            data["fl_bpd"] = b1.text_input("FL/BPD", value=st.session_state.get("sr_fl_bpd", ""))
-            data["fl_ac"] = b2.text_input("FL/AC", value=st.session_state.get("sr_fl_ac", ""))
+            data["fl_bpd"] = b1.text_input("FL/BPD", value=st.session_state.get(f"sr_fl_bpd_{v}", ""), key=f"sr_fl_bpd_{v}")
+            data["fl_ac"] = b2.text_input("FL/AC", value=st.session_state.get(f"sr_fl_ac_{v}", ""), key=f"sr_fl_ac_{v}")
 
             b1, b2 = st.columns(2)
-            data["mean_age"] = b1.text_input("Mean Age", value=st.session_state.get("sr_mean_age", ""), key="sr_mean_age")
-            data["fetal_weight"] = b2.text_input("Fetal Weight (g)", value=st.session_state.get("sr_fetal_weight", ""), key="sr_fetal_weight")
+            data["mean_age"] = b1.text_input("Mean Age", value=st.session_state.get(f"sr_mean_age_{v}", ""), key=f"sr_mean_age_{v}")
+            data["fetal_weight"] = b2.text_input("Fetal Weight (g)", value=st.session_state.get(f"sr_fetal_weight_{v}", ""), key=f"sr_fetal_weight_{v}")
 
             b1, b2 = st.columns(2)
-            data["fhr"] = b1.text_input("FHR", value=st.session_state.get("sr_fhr", ""), key="sr_fhr")
-            data["edd_lmp"] = b2.text_input("EDD (LMP)", value=st.session_state.get("sr_edd_lmp", ""))
-            data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get("sr_edd_cua", ""))
+            data["fhr"] = b1.text_input("FHR", value=st.session_state.get(f"sr_fhr_{v}", ""), key=f"sr_fhr_{v}")
+            data["edd_lmp"] = b2.text_input("EDD (LMP)", value=st.session_state.get(f"sr_edd_lmp_{v}", ""), key=f"sr_edd_lmp_{v}")
+            data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get(f"sr_edd_cua_{v}", ""), key=f"sr_edd_cua_{v}")
             
             st.markdown("**Doppler Indices & Percentiles**")
             b1, b2, b3 = st.columns(3)
-            data["umbilical_pi"] = b1.text_input("Umbilical PI", value=st.session_state.get("sr_umbilical_pi", ""), key="sr_umbilical_pi")
-            data["mca_pi"] = b2.text_input("MCA PI", value="")
-            data["uterine_pi"] = b3.text_input("Mean Uterine PI", value=st.session_state.get("sr_uterine_pi", ""), key="sr_uterine_pi")
+            data["umbilical_pi"] = b1.text_input("Umbilical PI", value=st.session_state.get(f"sr_umbilical_pi_{v}", ""), key=f"sr_umbilical_pi_{v}")
+            data["mca_pi"] = b2.text_input("MCA PI", value="", key=f"sr_mca_pi_{v}")
+            data["uterine_pi"] = b3.text_input("Mean Uterine PI", value=st.session_state.get(f"sr_uterine_pi_{v}", ""), key=f"sr_uterine_pi_{v}")
 
             data["ga_weeks_dop"] = st.number_input("GA (weeks) for Percentiles", min_value=10.0, max_value=42.0, value=28.0, step=0.1)
 
@@ -678,6 +889,15 @@ with col1:
                 b1, b2 = st.columns(2)
                 data["corpus_side"] = b1.selectbox("Side", ["Right", "Left"])
                 data["corpus_size"] = b2.text_input("Size (mm)")
+
+    elif template_id == "NT_NB":
+        with st.expander("Typist Inputs (NT / NB)", expanded=True):
+            data["dv_pi"] = st.text_input("Ductus Venosus PI", value="")
+            data["dv_awave"] = st.selectbox("DV A-Wave", ["Positive", "Absent", "Reversed"])
+            
+            b1, b2 = st.columns(2)
+            data["placenta_pos"] = b1.selectbox("Placenta Position", ["ANTERIOR", "POSTERIOR", "FUNDAL", "LOW-LYING"])
+            data["cervix"] = b2.text_input("Cervix Length", value="")
 
     else:
         with st.expander("Anatomy & Presentation", expanded=True):
