@@ -957,9 +957,12 @@ with col1:
             b1, b2 = st.columns(2)
             data["mean_age"] = b1.text_input("Mean Age", value=st.session_state.get(f"sr_mean_age_{v}", ""), key=f"sr_mean_age_{v}")
             data["fetal_weight"] = b2.text_input("Fetal Weight (g)", value=st.session_state.get(f"sr_fetal_weight_{v}", ""), key=f"sr_fetal_weight_{v}")
-            data["fetal_weight_pct"] = b2.text_input("EFW Percentile (%)", value=st.session_state.get(f"sr_fetal_weight_pct_{v}", ""), key=f"sr_fetal_weight_pct_{v}")
-            if data["fetal_weight_pct"]:
-                bar_efw = generate_percentile_bar(data["fetal_weight_pct"])
+            
+            # We use a separate variable for the text input, then assign it to data
+            efw_pct_val = b2.text_input("EFW Percentile (%)", value=st.session_state.get(f"sr_fetal_weight_pct_{v}", ""), key=f"sr_fetal_weight_pct_{v}")
+            if efw_pct_val:
+                data["fetal_weight_pct"] = efw_pct_val
+                bar_efw = generate_percentile_bar(efw_pct_val)
                 if bar_efw: b2.image(bar_efw, use_container_width=True)
             b1, b2 = st.columns(2)
             data["fhr"] = b1.text_input("FHR", value=st.session_state.get(f"sr_fhr_{v}", ""), key=f"sr_fhr_{v}")
