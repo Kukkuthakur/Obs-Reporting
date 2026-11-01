@@ -764,7 +764,7 @@ with col1:
                 else:
                     ds = pydicom.dcmread(io.BytesIO(uploaded_sr.read()))
                     st.session_state["sr_data"] = extract_sr_data(ds)
-                st.session_state["sr_data"] = extract_sr_data(ds)
+                
                 st.session_state["dicom_version"] += 1  # Force refresh
                 st.session_state["last_json_mtime"] = None # Ignore old listener file
                 st.success("DICOM SR File Loaded (Manual)")
@@ -800,46 +800,53 @@ with col1:
     sr_data = st.session_state.get("sr_data", {})
     v = st.session_state["dicom_version"]
     
-    if 'bpd' in sr_data: st.session_state[f"sr_bpd_size_{v}"] = sr_data['bpd']
-    if 'hc' in sr_data: st.session_state[f"sr_hc_size_{v}"] = sr_data['hc']
-    if 'ac' in sr_data: st.session_state[f"sr_ac_size_{v}"] = sr_data['ac']
-    if 'fl' in sr_data: st.session_state[f"sr_fl_size_{v}"] = sr_data['fl']
-    if 'hl' in sr_data: st.session_state[f"sr_hl_size_{v}"] = sr_data['hl']
+    if "last_applied_version" not in st.session_state:
+        st.session_state["last_applied_version"] = -1
+        
+    apply_new_data = st.session_state["last_applied_version"] != v
     
-    for p in ["bpd", "hc", "ac", "fl", "hl"]:
-        if f"{p}_wks" in sr_data: st.session_state[f"sr_{p}_wks_{v}"] = sr_data[f"{p}_wks"]
-        if f"{p}_dys" in sr_data: st.session_state[f"sr_{p}_dys_{v}"] = sr_data[f"{p}_dys"]
-        if f"{p}_pct" in sr_data: st.session_state[f"sr_{p}_pct_{v}"] = sr_data[f"{p}_pct"]
+    if apply_new_data:
+        if 'bpd' in sr_data: st.session_state[f"sr_bpd_size_{v}"] = sr_data['bpd']
+        if 'hc' in sr_data: st.session_state[f"sr_hc_size_{v}"] = sr_data['hc']
+        if 'ac' in sr_data: st.session_state[f"sr_ac_size_{v}"] = sr_data['ac']
+        if 'fl' in sr_data: st.session_state[f"sr_fl_size_{v}"] = sr_data['fl']
+        if 'hl' in sr_data: st.session_state[f"sr_hl_size_{v}"] = sr_data['hl']
+        
+        for p in ["bpd", "hc", "ac", "fl", "hl"]:
+            if f"{p}_wks" in sr_data: st.session_state[f"sr_{p}_wks_{v}"] = sr_data[f"{p}_wks"]
+            if f"{p}_dys" in sr_data: st.session_state[f"sr_{p}_dys_{v}"] = sr_data[f"{p}_dys"]
+            if f"{p}_pct" in sr_data: st.session_state[f"sr_{p}_pct_{v}"] = sr_data[f"{p}_pct"]
 
-    if 'msd' in sr_data: st.session_state[f"sr_msd_{v}"] = sr_data['msd']
-    if 'crl' in sr_data: st.session_state[f"sr_crl_{v}"] = sr_data['crl']
-    if 'nt' in sr_data: st.session_state[f"sr_nt_{v}"] = sr_data['nt']
-    if 'nasal_bone' in sr_data: st.session_state[f"sr_nasal_bone_{v}"] = sr_data['nasal_bone']
-    if 'fetal_weight' in sr_data: st.session_state[f"sr_fetal_weight_{v}"] = sr_data['fetal_weight']
-    if 'fhr' in sr_data: st.session_state[f"sr_fhr_{v}"] = sr_data['fhr']
-    if 'mean_age' in sr_data: st.session_state[f"sr_mean_age_{v}"] = sr_data['mean_age']
-    
-    if 'edd_lmp' in sr_data: st.session_state[f"sr_edd_lmp_{v}"] = sr_data['edd_lmp']
-    if 'edd_cua' in sr_data: st.session_state[f"sr_edd_cua_{v}"] = sr_data['edd_cua']
-    if 'lmp' in sr_data: st.session_state[f"sr_lmp_{v}"] = sr_data['lmp']
-    
-    if 'ga_lmp_days' in sr_data: 
-        st.session_state[f"sr_ga_lmp_{v}"] = f"{sr_data['ga_lmp_days']//7}w{sr_data['ga_lmp_days']%7}d"
+        if 'msd' in sr_data: st.session_state[f"sr_msd_{v}"] = sr_data['msd']
+        if 'crl' in sr_data: st.session_state[f"sr_crl_{v}"] = sr_data['crl']
+        if 'nt' in sr_data: st.session_state[f"sr_nt_{v}"] = sr_data['nt']
+        if 'nasal_bone' in sr_data: st.session_state[f"sr_nasal_bone_{v}"] = sr_data['nasal_bone']
+        if 'fetal_weight' in sr_data: st.session_state[f"sr_fetal_weight_{v}"] = sr_data['fetal_weight']
+        if 'fhr' in sr_data: st.session_state[f"sr_fhr_{v}"] = sr_data['fhr']
+        if 'mean_age' in sr_data: st.session_state[f"sr_mean_age_{v}"] = sr_data['mean_age']
+        
+        if 'edd_lmp' in sr_data: st.session_state[f"sr_edd_lmp_{v}"] = sr_data['edd_lmp']
+        if 'edd_cua' in sr_data: st.session_state[f"sr_edd_cua_{v}"] = sr_data['edd_cua']
+        if 'lmp' in sr_data: st.session_state[f"sr_lmp_{v}"] = sr_data['lmp']
+        
+        if 'ga_lmp_days' in sr_data: 
+            st.session_state[f"sr_ga_lmp_{v}"] = f"{sr_data['ga_lmp_days']//7}w{sr_data['ga_lmp_days']%7}d"
 
-    if 'umbilical_pi' in sr_data: st.session_state[f"sr_umbilical_pi_{v}"] = sr_data['umbilical_pi']
-    if 'uterine_pi' in sr_data: st.session_state[f"sr_uterine_pi_{v}"] = sr_data['uterine_pi']
+        if 'umbilical_pi' in sr_data: st.session_state[f"sr_umbilical_pi_{v}"] = sr_data['umbilical_pi']
+        if 'uterine_pi' in sr_data: st.session_state[f"sr_uterine_pi_{v}"] = sr_data['uterine_pi']
+        
+        st.session_state["last_applied_version"] = v
+
     # --------------------------
     lmp_not_sure = st.checkbox("LMP Not Sure / Not Known")
     if lmp_not_sure:
         data["lmp"] = "Not Sure"
     else:
-        data["lmp"] = st.text_input("LMP", value=st.session_state.get("sr_lmp", ""))
+        data["lmp"] = st.text_input("LMP", value=st.session_state.get(f"sr_lmp_{v}", ""))
 
     with st.expander("🔗 DICOM SR Data (Machine Generated)", expanded=False):
         st.markdown('<div class="dicom-box">Verify or override data received from the ultrasound machine.</div>', unsafe_allow_html=True)
         
-        v = st.session_state.get("dicom_version", 0)
-
         if template_id != "EARLY_OBS":
             # Timeline Header
             st.markdown(f"**LMP:** {st.session_state.get(f'sr_lmp_{v}', '')} &nbsp;|&nbsp; "
@@ -918,18 +925,17 @@ with col1:
                 if data.get("fl_size") and data.get("ac_size"):
                     fl_ac_val = (float(data["fl_size"]) / float(data["ac_size"])) * 100
                     st.session_state[f"sr_fl_ac_{v}"] = f"{fl_ac_val:.1f}%"
-           except:
+            except:
                 pass
 
             # --- CRITICAL FIX: Pull calculated percentiles from session_state into data dict ---
             for p in ["bpd", "hc", "ac", "fl", "hl"]:
-                # Grab whatever is in the session state box
                 pct_box_val = st.session_state.get(f"sr_{p}_pct_{v}", "")
-                # If the DICOM gave us a percentile, use it. Otherwise, use the box value.
                 if pct_box_val:
                     data[f"{p}_pct"] = pct_box_val
 
             data["fl_hc"] = b1.text_input("FL/HC", value=st.session_state.get(f"sr_fl_hc_{v}", ""), key=f"sr_fl_hc_{v}")
+            data["hc_ac"] = b2.text_input("HC/AC", value=st.session_state.get(f"sr_hc_ac_{v}", ""), key=f"sr_hc_ac_{v}")
             
             b1, b2 = st.columns(2)
             data["fl_bpd"] = b1.text_input("FL/BPD", value=st.session_state.get(f"sr_fl_bpd_{v}", ""), key=f"sr_fl_bpd_{v}")
