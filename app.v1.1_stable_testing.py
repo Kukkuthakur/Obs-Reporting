@@ -876,12 +876,7 @@ with col1:
                 st.success("DICOM SR File Loaded (Manual)")
             except Exception as e:
                 st.error(f"Error reading SR: {e}")
-                
-    with col_ref:
-        if st.button("🔄 Refresh from Listener", use_container_width=True):
-            st.session_state["last_json_mtime"] = None  # Forces the app to look at the file again
-            st.rerun()
-            
+                     
     with col_ref:
         if st.button("🔄 Refresh from Listener", use_container_width=True):
             st.session_state["last_json_mtime"] = None  # Forces the app to look at the file again
