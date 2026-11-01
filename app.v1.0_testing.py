@@ -666,16 +666,18 @@ def render_ob_preview(data, template_id):
         if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
             lines.append("")
             lines.append("DOPPLER INDICES:")
-            if data.get("umbilical_pi"):
-            ua_str = f"  Umbilical Artery: PI = {data.get('umbilical_pi')}"
-            if data.get("umbilical_pct"): ua_str += f" (Percentile: {data.get('umbilical_pct')}%)"
-            lines.append(ua_str)
             
-        if data.get("uterine_pi"):
-            notching = data.get("uterine_notching", "No notching")
-            uta_str = f"  Uterine Artery: PI = {data.get('uterine_pi')} ({notching})"
-            if data.get("uterine_pct"): uta_str += f" (Percentile: {data.get('uterine_pct')}%)"
-            lines.append(uta_str)
+            if data.get("umbilical_pi"):
+                ua_str = f"  Umbilical Artery: PI = {data.get('umbilical_pi')}"
+                if data.get("umbilical_pct"): ua_str += f" (Percentile: {data.get('umbilical_pct')}%)"
+                lines.append(ua_str)
+                
+            if data.get("uterine_pi"):
+                notching = data.get("uterine_notching", "No notching")
+                uta_str = f"  Uterine Artery: PI = {data.get('uterine_pi')} ({notching})"
+                if data.get("uterine_pct"): uta_str += f" (Percentile: {data.get('uterine_pct')}%)"
+                lines.append(uta_str)
+                
             if data.get("mca_pi"):
                 lines.append(f"  MCA: PI = {data.get('mca_pi')}")
 
@@ -832,6 +834,7 @@ with col1:
         if 'nt' in sr_data: st.session_state[f"sr_nt_{v}"] = sr_data['nt']
         if 'nasal_bone' in sr_data: st.session_state[f"sr_nasal_bone_{v}"] = sr_data['nasal_bone']
         if 'fetal_weight' in sr_data: st.session_state[f"sr_fetal_weight_{v}"] = sr_data['fetal_weight']
+        if 'fetal_weight_pct' in sr_data: st.session_state[f"sr_fetal_weight_pct_{v}"] = sr_data['fetal_weight_pct']
         if 'fhr' in sr_data: st.session_state[f"sr_fhr_{v}"] = sr_data['fhr']
         if 'mean_age' in sr_data: st.session_state[f"sr_mean_age_{v}"] = sr_data['mean_age']
         
@@ -909,15 +912,13 @@ with col1:
                 data[f"{p_key}_wks"] = c3.text_input(f"{p_key} wks", value=st.session_state.get(f"sr_{p_key}_wks_{v}", ""), key=f"sr_{p_key}_wks_{v}", label_visibility="collapsed")
                 data[f"{p_key}_dys"] = c4.text_input(f"{p_key} dys", value=st.session_state.get(f"sr_{p_key}_dys_{v}", ""), key=f"sr_{p_key}_dys_{v}", label_visibility="collapsed")
                 
-                pct_val = st.session_state.get(f"sr_{p_key}_pct_{v}", "")
+                # Make the percentile an editable text box, pre-filled with the DICOM value
+                pct_val = c5.text_input(f"{p_key} pct", value=st.session_state.get(f"sr_{p_key}_pct_{v}", ""), key=f"sr_{p_key}_pct_edit_{v}", label_visibility="collapsed")
+                
                 if pct_val:
                     bar_img = generate_percentile_bar(pct_val)
                     if bar_img:
                         c5.image(bar_img, use_container_width=True)
-                        c5.caption(f"{pct_val}%")
-                else:
-                    c5.text_input(f"{p_key} pct", value="", key=f"sr_{p_key}_pct_display_{v}", label_visibility="collapsed")
-
             st.markdown("---")
             st.markdown("**Ratios & Averages**")
             b1, b2 = st.columns(2)
@@ -940,7 +941,7 @@ with col1:
 
             # --- CRITICAL FIX: Pull calculated percentiles from session_state into data dict ---
             for p in ["bpd", "hc", "ac", "fl", "hl"]:
-                pct_box_val = st.session_state.get(f"sr_{p}_pct_{v}", "")
+                pct_box_val = st.session_state.get(f"sr_{p}_pct_edit_{v}", "")
                 if pct_box_val:
                     data[f"{p}_pct"] = pct_box_val
 
