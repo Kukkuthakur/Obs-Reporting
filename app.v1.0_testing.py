@@ -229,8 +229,20 @@ def extract_sr_data(ds):
     if 'edd_cua' not in extracted and 'ga_usg_days' in extracted:
         extracted['edd_cua'] = (today + timedelta(days=(280 - extracted['ga_usg_days']))).strftime("%d-%m-%Y")
 
-    return extracted
+    # --- GRAB AND SPLIT PATIENT NAME/AGE ---
+    if hasattr(ds, 'PatientName'):
+        raw_name = str(ds.PatientName).replace('^', ' ').strip()
+        extracted['patient_name'] = raw_name
+        # Try to split the name and age (e.g., "SHIVANI 22Y/F")
+        if 'Y/F' in raw_name.upper():
+            parts = raw_name.upper().split('Y/F')
+            age_part = parts[0].strip().split(' ')[-1] # Get the last word before Y/F (the age)
+            name_part = parts[0].strip().replace(age_part, '').strip() # Remove the age from the name
+            extracted['patient_age'] = age_part
+            extracted['patient_name'] = name_part
+    # ---------------------------------------
 
+    return extracted
 # ============================================================
 # DOCX HELPERS
 # ============================================================
@@ -423,8 +435,15 @@ def build_docx_bytes(data, template_id):
     else:
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        
+        # Combine Presentation and Lie
+        pres_text = data.get('presentation', 'variable').lower()
+        lie_text = data.get('lie', 'None')
+        if lie_text != "None":
+            pres_text += f", {lie_text}"
+            
         add_run(p, f"Uterus shows single live fetus. Fetus is in ")
-        add_run(p, f"{data.get('presentation', 'variable').lower()} presentation", bold=True, italic=True)
+        add_run(p, f"{pres_text} presentation", bold=True, italic=True)
         add_run(p, f" at the time of scanning. Fetal movements are present. Fetal cardiac pulsations are appreciated.")
         doc.add_paragraph()
 
@@ -503,42 +522,46 @@ def build_docx_bytes(data, template_id):
 
         # ... (Keep your EDD table code here) ...
 
-        # --- DOPPLER SECTION WITH BARS ---
+        # --- DOPPLER SECTION WITH TABLE ---
         if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
             doc.add_paragraph()
             doppler_head = doc.add_paragraph()
             add_run(doppler_head, "DOPPLER INDICES:", bold=True, underline=True)
             
-            if data.get("umbilical_pi"):
-                p = doc.add_paragraph()
-                add_run(p, "Umbilical Artery: ", bold=True)
-                add_run(p, f"PI = {data.get('umbilical_pi')}", italic=True)
-                if data.get("umbilical_pct"):
-                    p.add_run(f"  (Percentile: {data.get('umbilical_pct')}%)")
-                    bar_img_ua = generate_percentile_bar(data.get("umbilical_pct"))
-                    if bar_img_ua:
-                        p.add_run().add_picture(bar_img_ua, width=Cm(3.0))
+            dop_table = doc.add_table(rows=1, cols=3)
+            set_table_borders(dop_table)
+            
+            # Headers
+            hdr_cells = dop_table.rows[0].cells
+            add_run(hdr_cells[0].paragraphs[0], "Vessel", bold=True, size=10)
+            add_run(hdr_cells[1].paragraphs[0], "Value", bold=True, size=10)
+            add_run(hdr_cells[2].paragraphs[0], "Percentile", bold=True, size=10)
 
-            if data.get("uterine_pi"):
-                p = doc.add_paragraph()
-                add_run(p, "Uterine Artery: ", bold=True)
-                notching = data.get("uterine_notching", "No notching")
-                if notching == "No notching":
-                    add_run(p, f"PI = {data.get('uterine_pi')} (No notching seen)", italic=True)
+            def add_doppler_row(vessel, value_text, pct_val):
+                row = dop_table.add_row().cells
+                add_run(row[0].paragraphs[0], vessel, italic=True, size=10)
+                add_run(row[1].paragraphs[0], value_text, italic=True, size=10)
+                if pct_val:
+                    row[2].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    bar_img = generate_percentile_bar(pct_val)
+                    if bar_img:
+                        row[2].paragraphs[0].add_run().add_picture(bar_img, width=Cm(3.5))
+                    p_txt = row[2].add_paragraph(f"{pct_val}%")
+                    p_txt.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    if p_txt.runs: p_txt.runs[0].font.size = Pt(8)
                 else:
-                    add_run(p, f"PI = {data.get('uterine_pi')} ({notching})", italic=True)
-                if data.get("uterine_pct"):
-                    p.add_run(f"  (Percentile: {data.get('uterine_pct')}%)")
-                    bar_img_uta = generate_percentile_bar(data.get("uterine_pct"))
-                    if bar_img_uta:
-                        p.add_run().add_picture(bar_img_uta, width=Cm(3.0))
+                    add_run(row[2].paragraphs[0], "-", italic=True, size=10)
+
+            if data.get("umbilical_pi"):
+                add_doppler_row("Umbilical Artery", f"PI = {data.get('umbilical_pi')}", data.get("umbilical_pct"))
+                
+            if data.get("uterine_pi"):
+                notching = data.get("uterine_notching", "No notching")
+                val_str = f"PI = {data.get('uterine_pi')} ({notching})"
+                add_doppler_row("Uterine Artery", val_str, data.get("uterine_pct"))
                 
             if data.get("mca_pi"):
-                p = doc.add_paragraph()
-                add_run(p, "MCA: ", bold=True)
-                add_run(p, f"PI = {data.get('mca_pi')}", italic=True)
-
-    # 5. IMPRESSION
+                add_doppler_row("MCA", f"PI = {data.get('mca_pi')}", "")
 
     # 5. IMPRESSION
     doc.add_paragraph()
@@ -555,7 +578,11 @@ def build_docx_bytes(data, template_id):
     elif template_id == "NT_NB":
         imp_text = f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
     else:
-        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {data.get('presentation', 'variable').lower()} presentation of approx. {mean_age} gestation age."
+        pres_text = data.get('presentation', 'variable').lower()
+        lie_text = data.get('lie', 'None')
+        if lie_text != "None":
+            pres_text += f", {lie_text}"
+        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text} presentation of approx. {mean_age} gestation age."
     p = doc.add_paragraph(); add_run(p, imp_text, bold=True, italic=True)
 
     # 6. PNDT
@@ -617,7 +644,13 @@ def render_ob_preview(data, template_id):
         lines.append(f"  EDD (CUA): {data.get('edd_cua', '')}")
 
     else:
-        lines.append(f"Uterus shows single live fetus. Fetus is in {data.get('presentation', 'variable').lower()} presentation at the time of scanning. Fetal movements are present. Fetal cardiac pulsations are appreciated.")
+        # Combine Presentation and Lie
+        pres_text = data.get('presentation', 'variable').lower()
+        lie_text = data.get('lie', 'None')
+        if lie_text != "None":
+            pres_text += f", {lie_text}"
+            
+        lines.append(f"Uterus shows single live fetus. Fetus is in {pres_text} presentation at the time of scanning. Fetal movements are present. Fetal cardiac pulsations are appreciated.")
         lines.append("")
         lines.append("BIO PHYSICAL PARAMETERS:")
         for param in ["bpd", "hc", "ac", "fl", "hl"]:
@@ -695,7 +728,11 @@ def render_ob_preview(data, template_id):
     elif template_id == "NT_NB":
         imp_text = f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
     else:
-        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {data.get('presentation', 'variable').lower()} presentation of approx. {mean_age} gestation age."
+        pres_text = data.get('presentation', 'variable').lower()
+        lie_text = data.get('lie', 'None')
+        if lie_text != "None":
+            pres_text += f", {lie_text}"
+        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text} presentation of approx. {mean_age} gestation age."
     lines.append(f"  - {imp_text}")
 
     lines.append("")
@@ -743,9 +780,12 @@ st.markdown('<div class="clinic-title">डॉ. प्रणव एवं डॉ.
 st.markdown('<div class="clinic-sub">Precision Imaging. Trusted Diagnostics. Agra.</div>', unsafe_allow_html=True)
 
 # Patient Demographics Top Bar
+# We need to define 'v' here so the top bar knows which version to load
+v = st.session_state.get("dicom_version", 0)
+
 c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 2, 3])
-with c1: p_name = st.text_input("Name")
-with c2: p_age = st.text_input("Age")
+with c1: p_name = st.text_input("Name", value=st.session_state.get(f"sr_patient_name_{v}", ""))
+with c2: p_age = st.text_input("Age", value=st.session_state.get(f"sr_patient_age_{v}", ""))
 with c3: p_sex = st.radio("Sex", ["F", "M"], horizontal=True)
 with c4: p_date = st.text_input("Date", value=datetime.now().strftime("%d-%b-%y"))
 with c5: p_ref = st.text_input("Referred by")
@@ -820,6 +860,10 @@ with col1:
     apply_new_data = st.session_state["last_applied_version"] != v
     
     if apply_new_data:
+        # --- NEW: Auto-fill Patient Info ---
+        if 'patient_name' in sr_data: st.session_state[f"sr_patient_name_{v}"] = sr_data['patient_name']
+        if 'patient_age' in sr_data: st.session_state[f"sr_patient_age_{v}"] = sr_data['patient_age']
+        
         if 'bpd' in sr_data: st.session_state[f"sr_bpd_size_{v}"] = sr_data['bpd']
         if 'hc' in sr_data: st.session_state[f"sr_hc_size_{v}"] = sr_data['hc']
         if 'ac' in sr_data: st.session_state[f"sr_ac_size_{v}"] = sr_data['ac']
@@ -836,7 +880,7 @@ with col1:
         if 'nt' in sr_data: st.session_state[f"sr_nt_{v}"] = sr_data['nt']
         if 'nasal_bone' in sr_data: st.session_state[f"sr_nasal_bone_{v}"] = sr_data['nasal_bone']
         if 'fetal_weight' in sr_data: st.session_state[f"sr_fetal_weight_{v}"] = sr_data['fetal_weight']
-        if 'fetal_weight_pct' in sr_data: st.session_state[f"sr_fetal_weight_pct_{v}"] = sr_data['fetal_weight_pct']
+        if 'fetal_weight_pct' in sr_data: st.session_state[f"sr_fetal_weight_pct_edit_{v}"] = sr_data['fetal_weight_pct']
         if 'fhr' in sr_data: st.session_state[f"sr_fhr_{v}"] = sr_data['fhr']
         if 'mean_age' in sr_data: st.session_state[f"sr_mean_age_{v}"] = sr_data['mean_age']
         
@@ -958,10 +1002,12 @@ with col1:
             data["mean_age"] = b1.text_input("Mean Age", value=st.session_state.get(f"sr_mean_age_{v}", ""), key=f"sr_mean_age_{v}")
             data["fetal_weight"] = b2.text_input("Fetal Weight (g)", value=st.session_state.get(f"sr_fetal_weight_{v}", ""), key=f"sr_fetal_weight_{v}")
             
-            # We use a separate variable for the text input, then assign it to data
-            efw_pct_val = b2.text_input("EFW Percentile (%)", value=st.session_state.get(f"sr_fetal_weight_pct_{v}", ""), key=f"sr_fetal_weight_pct_{v}")
+            # EFW Percentile Fix
+            # Streamlit doesn't update the data dictionary automatically when you change a widget with a key. 
+            # We have to pull it directly from session_state right before building the doc.
+            efw_pct_val = b2.text_input("EFW Percentile (%)", value=st.session_state.get(f"sr_fetal_weight_pct_{v}", ""), key=f"sr_fetal_weight_pct_edit_{v}")
+            data["fetal_weight_pct"] = efw_pct_val
             if efw_pct_val:
-                data["fetal_weight_pct"] = efw_pct_val
                 bar_efw = generate_percentile_bar(efw_pct_val)
                 if bar_efw: b2.image(bar_efw, use_container_width=True)
             b1, b2 = st.columns(2)
