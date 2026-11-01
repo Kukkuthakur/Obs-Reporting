@@ -454,9 +454,6 @@ def build_docx_bytes(data, template_id):
             
         add_run(p, f"Uterus shows single live fetus. Fetus is in ")
         add_run(p, f"{pres_text}", bold=True, italic=True)
-            
-        add_run(p, f"Uterus shows single live fetus. Fetus is in ")
-        add_run(p, f"{pres_text} presentation", bold=True, italic=True)
         add_run(p, f" at the time of scanning. Fetal movements are present. Fetal cardiac pulsations are appreciated.")
         doc.add_paragraph()
 
@@ -581,17 +578,6 @@ def build_docx_bytes(data, template_id):
             draw_bar(pct_cells[1], data.get("uterine_pct"))
             draw_bar(pct_cells[2], "")
 
-            if data.get("umbilical_pi"):
-                add_doppler_row("Umbilical Artery", f"PI = {data.get('umbilical_pi')}", data.get("umbilical_pct"))
-                
-            if data.get("uterine_pi"):
-                notching = data.get("uterine_notching", "No notching")
-                val_str = f"PI = {data.get('uterine_pi')} ({notching})"
-                add_doppler_row("Uterine Artery", val_str, data.get("uterine_pct"))
-                
-            if data.get("mca_pi"):
-                add_doppler_row("MCA", f"PI = {data.get('mca_pi')}", "")
-
     # 5. IMPRESSION
     doc.add_paragraph()
     imp_head = doc.add_paragraph()
@@ -676,10 +662,20 @@ def render_ob_preview(data, template_id):
         # Combine Presentation and Lie
         pres_text = data.get('presentation', 'variable').lower()
         lie_text = data.get('lie', 'None')
+        
+        lie_map = {
+            "LOA": "Left Occiputo-Anterior",
+            "ROA": "Right Occiputo-Anterior",
+            "LOP": "Left Occiputo-Posterior",
+            "ROP": "Right Occiputo-Posterior"
+        }
+        
         if lie_text != "None":
-            pres_text += f", {lie_text}"
+            pres_text = f"{pres_text.capitalize()} presentation & {lie_map.get(lie_text, lie_text)} lie"
+        else:
+            pres_text = f"{pres_text.capitalize()} presentation"
             
-        lines.append(f"Uterus shows single live fetus. Fetus is in {pres_text} presentation at the time of scanning. Fetal movements are present. Fetal cardiac pulsations are appreciated.")
+        lines.append(f"Uterus shows single live fetus. Fetus is in {pres_text} at the time of scanning. Fetal movements are present. Fetal cardiac pulsations are appreciated.")
         lines.append("")
         lines.append("BIO PHYSICAL PARAMETERS:")
         for param in ["bpd", "hc", "ac", "fl", "hl"]:
@@ -878,7 +874,7 @@ with col1:
                 st.error(f"Error reading SR: {e}")
                      
     with col_ref:
-        if st.button("🔄 Refresh from Listener", use_container_width=True):
+        if st.button("🔄 Refresh from Listener", use_container_width=True, key="refresh_btn"):
             st.session_state["last_json_mtime"] = None  # Forces the app to look at the file again
             st.rerun()
             
