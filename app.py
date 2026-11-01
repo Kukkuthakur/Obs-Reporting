@@ -245,6 +245,20 @@ def generate_afi_text(afi_val, is_total=True):
 # ============================================================
 # DOCX BUILDER
 # ============================================================
+def generate_doppler_text(data):
+    doppler_lines = []
+    if data.get("umbilical_pi"):
+        doppler_lines.append(f"Umbilical Artery: PI = {data.get('umbilical_pi')}")
+    if data.get("uterine_pi"):
+        notching = data.get("uterine_notching", "No notching")
+        if notching == "No notching":
+            doppler_lines.append(f"Uterine Artery: PI = {data.get('uterine_pi')} (No notching seen)")
+        else:
+            doppler_lines.append(f"Uterine Artery: PI = {data.get('uterine_pi')} ({notching})")
+    if data.get("mca_pi"):
+        doppler_lines.append(f"MCA: PI = {data.get('mca_pi')}")
+    return "\n".join(doppler_lines)
+
 def build_docx_bytes(data, template_id):
     doc = Document()
     section = doc.sections[0]
@@ -464,7 +478,60 @@ def build_docx_bytes(data, template_id):
 
         if template_id == "T3" and data.get('measure_scar'):
             p = doc.add_paragraph()
-            add_run(p, "Scar Thickness: ", bold=True); add_run(p, f"{data.get('scar_size', '')} mm", italic=True)
+            add_run(p, "Scar Thickness: ", bold=True)
+            add_run(p, f"{data.get('scar_size', '')} mm", italic=True)
+
+        # --- DOPPLER SECTION ---
+        if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
+            doc.add_paragraph()
+            doppler_head = doc.add_paragraph()
+            add_run(doppler_head, "DOPPLER INDICES:", bold=True, underline=True)
+            
+            if data.get("umbilical_pi"):
+                p = doc.add_paragraph()
+                add_run(p, "Umbilical Artery: ", bold=True)
+                add_run(p, f"PI = {data.get('umbilical_pi')}", italic=True)
+                
+            if data.get("uterine_pi"):
+                p = doc.add_paragraph()
+                add_run(p, "Uterine Artery: ", bold=True)
+                notching = data.get("uterine_notching", "No notching")
+                if notching == "No notching":
+                    add_run(p, f"PI = {data.get('uterine_pi')} (No notching seen)", italic=True)
+                else:
+                    add_run(p, f"PI = {data.get('uterine_pi')} ({notching})", italic=True)
+                
+            if data.get("mca_pi"):
+                p = doc.add_paragraph()
+                add_run(p, "MCA: ", bold=True)
+                add_run(p, f"PI = {data.get('mca_pi')}", italic=True)
+
+        # --- DOPPLER SECTION ---
+        if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
+            doc.add_paragraph()
+            doppler_head = doc.add_paragraph()
+            add_run(doppler_head, "DOPPLER INDICES:", bold=True, underline=True)
+            
+            if data.get("umbilical_pi"):
+                p = doc.add_paragraph()
+                add_run(p, "Umbilical Artery: ", bold=True)
+                add_run(p, f"PI = {data.get('umbilical_pi')}", italic=True)
+                
+            if data.get("uterine_pi"):
+                p = doc.add_paragraph()
+                add_run(p, "Uterine Artery: ", bold=True)
+                notching = data.get("uterine_notching", "No notching")
+                if notching == "No notching":
+                    add_run(p, f"PI = {data.get('uterine_pi')} (No notching seen)", italic=True)
+                else:
+                    add_run(p, f"PI = {data.get('uterine_pi')} ({notching})", italic=True)
+                
+            if data.get("mca_pi"):
+                p = doc.add_paragraph()
+                add_run(p, "MCA: ", bold=True)
+                add_run(p, f"PI = {data.get('mca_pi')}", italic=True)
+
+    # 5. IMPRESSION
 
     # 5. IMPRESSION
     doc.add_paragraph()
@@ -586,7 +653,23 @@ def render_ob_preview(data, template_id):
             lines.append(" ".join(parts))
         else: lines.append("NO LOOP OF CORD SEEN AROUND THE NECK.")
 
-        if template_id == "T3" and data.get('measure_scar'): lines.append(f"Scar Thickness: {data.get('scar_size', '')} mm")
+        if template_id == "T3" and data.get('measure_scar'): 
+            lines.append(f"Scar Thickness: {data.get('scar_size', '')} mm")
+
+        # --- DOPPLER SECTION PREVIEW ---
+        if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
+            lines.append("")
+            lines.append("DOPPLER INDICES:")
+            if data.get("umbilical_pi"):
+                lines.append(f"  Umbilical Artery: PI = {data.get('umbilical_pi')}")
+            if data.get("uterine_pi"):
+                notching = data.get("uterine_notching", "No notching")
+                if notching == "No notching":
+                    lines.append(f"  Uterine Artery: PI = {data.get('uterine_pi')} (No notching seen)")
+                else:
+                    lines.append(f"  Uterine Artery: PI = {data.get('uterine_pi')} ({notching})")
+            if data.get("mca_pi"):
+                lines.append(f"  MCA: PI = {data.get('mca_pi')}")
 
     lines.append(""); lines.append("IMPRESSION:")
     mean_age = data.get('mean_age', '')
@@ -861,6 +944,8 @@ with col1:
             data["umbilical_pi"] = b1.text_input("Umbilical PI", value=st.session_state.get(f"sr_umbilical_pi_{v}", ""), key=f"sr_umbilical_pi_{v}")
             data["mca_pi"] = b2.text_input("MCA PI", value="", key=f"sr_mca_pi_{v}")
             data["uterine_pi"] = b3.text_input("Mean Uterine PI", value=st.session_state.get(f"sr_uterine_pi_{v}", ""), key=f"sr_uterine_pi_{v}")
+            
+            data["uterine_notching"] = st.selectbox("Uterine Artery Notching", ["No notching", "Unilateral Notching", "Bilateral Notching"])
 
             data["ga_weeks_dop"] = st.number_input("GA (weeks) for Percentiles", min_value=10.0, max_value=42.0, value=28.0, step=0.1)
 
