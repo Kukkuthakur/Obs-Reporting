@@ -439,8 +439,21 @@ def build_docx_bytes(data, template_id):
         # Combine Presentation and Lie
         pres_text = data.get('presentation', 'variable').lower()
         lie_text = data.get('lie', 'None')
+        
+        lie_map = {
+            "LOA": "Left Occiputo-Anterior",
+            "ROA": "Right Occiputo-Anterior",
+            "LOP": "Left Occiputo-Posterior",
+            "ROP": "Right Occiputo-Posterior"
+        }
+        
         if lie_text != "None":
-            pres_text += f", {lie_text}"
+            pres_text = f"{pres_text.capitalize()} presentation & {lie_map.get(lie_text, lie_text)} lie"
+        else:
+            pres_text = f"{pres_text.capitalize()} presentation"
+            
+        add_run(p, f"Uterus shows single live fetus. Fetus is in ")
+        add_run(p, f"{pres_text}", bold=True, italic=True)
             
         add_run(p, f"Uterus shows single live fetus. Fetus is in ")
         add_run(p, f"{pres_text} presentation", bold=True, italic=True)
@@ -528,29 +541,45 @@ def build_docx_bytes(data, template_id):
             doppler_head = doc.add_paragraph()
             add_run(doppler_head, "DOPPLER INDICES:", bold=True, underline=True)
             
-            dop_table = doc.add_table(rows=1, cols=3)
+            # A single, horizontal 3-column table to save space
+            dop_table = doc.add_table(rows=3, cols=3)
             set_table_borders(dop_table)
+            dop_table.alignment = WD_TABLE_ALIGNMENT.CENTER
             
-            # Headers
+            # Row 0: Headers
             hdr_cells = dop_table.rows[0].cells
-            add_run(hdr_cells[0].paragraphs[0], "Vessel", bold=True, size=10)
-            add_run(hdr_cells[1].paragraphs[0], "Value", bold=True, size=10)
-            add_run(hdr_cells[2].paragraphs[0], "Percentile", bold=True, size=10)
+            add_run(hdr_cells[0].paragraphs[0], "Umbilical Artery", bold=True, size=10)
+            add_run(hdr_cells[1].paragraphs[0], "Uterine Artery", bold=True, size=10)
+            add_run(hdr_cells[2].paragraphs[0], "MCA", bold=True, size=10)
+            for cell in hdr_cells:
+                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            def add_doppler_row(vessel, value_text, pct_val):
-                row = dop_table.add_row().cells
-                add_run(row[0].paragraphs[0], vessel, italic=True, size=10)
-                add_run(row[1].paragraphs[0], value_text, italic=True, size=10)
+            # Row 1: Values
+            val_cells = dop_table.rows[1].cells
+            add_run(val_cells[0].paragraphs[0], f"PI = {data.get('umbilical_pi', '-')}", italic=True, size=10)
+            notching = data.get("uterine_notching", "No notching")
+            add_run(val_cells[1].paragraphs[0], f"PI = {data.get('uterine_pi', '-')} ({notching})", italic=True, size=10)
+            add_run(val_cells[2].paragraphs[0], f"PI = {data.get('mca_pi', '-')}", italic=True, size=10)
+            for cell in val_cells:
+                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            # Row 2: Bars
+            pct_cells = dop_table.rows[2].cells
+            def draw_bar(cell, pct_val):
                 if pct_val:
-                    row[2].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                     bar_img = generate_percentile_bar(pct_val)
                     if bar_img:
-                        row[2].paragraphs[0].add_run().add_picture(bar_img, width=Cm(3.5))
-                    p_txt = row[2].add_paragraph(f"{pct_val}%")
+                        cell.paragraphs[0].add_run().add_picture(bar_img, width=Cm(3.5))
+                    p_txt = cell.add_paragraph(f"{pct_val}%")
                     p_txt.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     if p_txt.runs: p_txt.runs[0].font.size = Pt(8)
                 else:
-                    add_run(row[2].paragraphs[0], "-", italic=True, size=10)
+                    add_run(cell.paragraphs[0], "-", italic=True, size=10)
+            
+            draw_bar(pct_cells[0], data.get("umbilical_pct"))
+            draw_bar(pct_cells[1], data.get("uterine_pct"))
+            draw_bar(pct_cells[2], "")
 
             if data.get("umbilical_pi"):
                 add_doppler_row("Umbilical Artery", f"PI = {data.get('umbilical_pi')}", data.get("umbilical_pct"))
@@ -779,13 +808,36 @@ st.markdown("""
 st.markdown('<div class="clinic-title">डॉ. प्रणव एवं डॉ. गौरव इमेजिंग, आगरा</div>', unsafe_allow_html=True)
 st.markdown('<div class="clinic-sub">Precision Imaging. Trusted Diagnostics. Agra.</div>', unsafe_allow_html=True)
 
-# Patient Demographics Top Bar
-# We need to define 'v' here so the top bar knows which version to load
+# --- NEW: CHECK LISTENER JSON AT THE VERY TOP ---
+import json
+import os
+json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'latest_sr.json')
+
+if os.path.exists(json_path):
+    try:
+        mtime = os.path.getmtime(json_path)
+        if st.session_state.get("last_json_mtime") != mtime:
+            with open(json_path, 'r') as f:
+                new_data = json.load(f)
+            st.session_state["sr_data"] = new_data
+            st.session_state["last_json_mtime"] = mtime
+            st.session_state["dicom_version"] = st.session_state.get("dicom_version", 0) + 1
+            st.toast("✅ Loaded fresh data from DICOM Listener!")
+    except Exception as e:
+        pass
+# -----------------------------------------------
+
 v = st.session_state.get("dicom_version", 0)
+sr_data = st.session_state.get("sr_data", {})
+
+# FORCE NAME/AGE INTO SESSION STATE IMMEDIATELY
+if 'patient_name' in sr_data: st.session_state[f"sr_patient_name_{v}"] = sr_data['patient_name']
+if 'patient_age' in sr_data: st.session_state[f"sr_patient_age_{v}"] = sr_data['patient_age']
+if 'fetal_weight_pct' in sr_data: st.session_state[f"sr_fetal_weight_pct_edit_{v}"] = sr_data['fetal_weight_pct']
 
 c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 2, 3])
-with c1: p_name = st.text_input("Name", value=st.session_state.get(f"sr_patient_name_{v}", ""))
-with c2: p_age = st.text_input("Age", value=st.session_state.get(f"sr_patient_age_{v}", ""))
+with c1: p_name = st.text_input("Name", value=st.session_state.get(f"sr_patient_name_{v}", ""), key=f"p_name_input_{v}")
+with c2: p_age = st.text_input("Age", value=st.session_state.get(f"sr_patient_age_{v}", ""), key=f"p_age_input_{v}")
 with c3: p_sex = st.radio("Sex", ["F", "M"], horizontal=True)
 with c4: p_date = st.text_input("Date", value=datetime.now().strftime("%d-%b-%y"))
 with c5: p_ref = st.text_input("Referred by")
@@ -830,25 +882,10 @@ with col1:
             st.session_state["last_json_mtime"] = None  # Forces the app to look at the file again
             st.rerun()
             
-    # Check for automated listener file
-    json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'latest_sr.json')
-    
-    if uploaded_sr is None and os.path.exists(json_path):
-        try:
-            mtime = os.path.getmtime(json_path)
-            
-            # If the file is new
-            if st.session_state.get("last_json_mtime") != mtime:
-                with open(json_path, 'r') as f:
-                    st.session_state["sr_data"] = json.load(f)
-                st.session_state["last_json_mtime"] = mtime
-                st.session_state["dicom_version"] += 1  # Force refresh
-                st.success("✅ Loaded fresh data from DICOM Listener!")
-            else:
-                st.info("✅ Listener data is up to date.")
-                
-        except Exception as e:
-            st.error(f"Error loading listener data: {e}")
+    with col_ref:
+        if st.button("🔄 Refresh from Listener", use_container_width=True):
+            st.session_state["last_json_mtime"] = None  # Forces the app to look at the file again
+            st.rerun()
             
     # Push values into session_state widgets with versioning
     sr_data = st.session_state.get("sr_data", {})
