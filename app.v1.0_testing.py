@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 def generate_percentile_bar(percentile):
-    """Generates a small PNG image of a percentile bar."""
+    """Generates a color-coded PNG image of a percentile bar."""
     if not percentile:
         return None
     
@@ -24,19 +24,38 @@ def generate_percentile_bar(percentile):
     except:
         return None
 
-    fig, ax = plt.subplots(figsize=(3, 0.4))
+    # Make the figure slightly taller to fit the color zones better
+    fig, ax = plt.subplots(figsize=(3, 0.5))
     fig.patch.set_alpha(0)
     
-    ax.plot([0, 100], [0, 0], color='lightgray', linewidth=4, zorder=1)
-    ax.plot([10, 90], [0, 0], color='#4CAF50', linewidth=4, zorder=2)
-    ax.scatter(pct, 0, color='#D32F2F', s=80, zorder=3, edgecolors='black')
+    # 1. Draw the color zones
+    # Red: < 5th
+    ax.plot([0, 5], [0, 0], color='#D32F2F', linewidth=6, zorder=1, solid_capstyle='butt')
+    # Yellow: 5th - 10th
+    ax.plot([5, 10], [0, 0], color='#FFC107', linewidth=6, zorder=1, solid_capstyle='butt')
+    # Green: 10th - 90th
+    ax.plot([10, 90], [0, 0], color='#4CAF50', linewidth=6, zorder=1, solid_capstyle='butt')
+    # Yellow: 90th - 95th
+    ax.plot([90, 95], [0, 0], color='#FFC107', linewidth=6, zorder=1, solid_capstyle='butt')
+    # Red: > 95th
+    ax.plot([95, 100], [0, 0], color='#D32F2F', linewidth=6, zorder=1, solid_capstyle='butt')
+    
+    # 2. Draw the marker dot
+    # If the dot is in a red or yellow zone, make it stand out more
+    dot_color = '#000000' if 10 <= pct <= 90 else '#D32F2F'
+    ax.scatter(pct, 0, color=dot_color, s=60, zorder=3, edgecolors='white', linewidths=1.5)
+    
+    # 3. Add subtle tick marks at 10 and 90
+    ax.plot([10, 10], [-0.15, 0.15], color='black', linewidth=1, zorder=2)
+    ax.plot([90, 90], [-0.15, 0.15], color='black', linewidth=1, zorder=2)
     
     ax.set_xlim(0, 100)
-    ax.set_ylim(-0.5, 0.5)
+    ax.set_ylim(-0.3, 0.3)
     ax.axis('off')
     
     buf = io.BytesIO()
-    plt.savefig(buf, format="png", bbox_inches='tight', transparent=True, dpi=200)
+    # Increased DPI slightly for a crisper look in Word
+    plt.savefig(buf, format="png", bbox_inches='tight', transparent=True, dpi=250)
     plt.close(fig)
     buf.seek(0)
     return buf
