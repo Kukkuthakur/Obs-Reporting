@@ -525,31 +525,6 @@ def build_docx_bytes(data, template_id):
                 add_run(p, "MCA: ", bold=True)
                 add_run(p, f"PI = {data.get('mca_pi')}", italic=True)
 
-        # --- DOPPLER SECTION ---
-        if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
-            doc.add_paragraph()
-            doppler_head = doc.add_paragraph()
-            add_run(doppler_head, "DOPPLER INDICES:", bold=True, underline=True)
-            
-            if data.get("umbilical_pi"):
-                p = doc.add_paragraph()
-                add_run(p, "Umbilical Artery: ", bold=True)
-                add_run(p, f"PI = {data.get('umbilical_pi')}", italic=True)
-                
-            if data.get("uterine_pi"):
-                p = doc.add_paragraph()
-                add_run(p, "Uterine Artery: ", bold=True)
-                notching = data.get("uterine_notching", "No notching")
-                if notching == "No notching":
-                    add_run(p, f"PI = {data.get('uterine_pi')} (No notching seen)", italic=True)
-                else:
-                    add_run(p, f"PI = {data.get('uterine_pi')} ({notching})", italic=True)
-                
-            if data.get("mca_pi"):
-                p = doc.add_paragraph()
-                add_run(p, "MCA: ", bold=True)
-                add_run(p, f"PI = {data.get('mca_pi')}", italic=True)
-
     # 5. IMPRESSION
 
     # 5. IMPRESSION
