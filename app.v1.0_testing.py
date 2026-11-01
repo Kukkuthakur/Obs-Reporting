@@ -800,34 +800,45 @@ with col1:
     sr_data = st.session_state.get("sr_data", {})
     v = st.session_state["dicom_version"]
     
-    if 'bpd' in sr_data: st.session_state[f"sr_bpd_size_{v}"] = sr_data['bpd']
-    if 'hc' in sr_data: st.session_state[f"sr_hc_size_{v}"] = sr_data['hc']
-    if 'ac' in sr_data: st.session_state[f"sr_ac_size_{v}"] = sr_data['ac']
-    if 'fl' in sr_data: st.session_state[f"sr_fl_size_{v}"] = sr_data['fl']
-    if 'hl' in sr_data: st.session_state[f"sr_hl_size_{v}"] = sr_data['hl']
+    # We create a specific flag so we ONLY push the DICOM data into the UI once per file load.
+    # This stops the app from overwriting your manual edits.
+    if "last_applied_version" not in st.session_state:
+        st.session_state["last_applied_version"] = -1
+        
+    apply_new_data = st.session_state["last_applied_version"] != v
     
-    for p in ["bpd", "hc", "ac", "fl", "hl"]:
-        if f"{p}_wks" in sr_data: st.session_state[f"sr_{p}_wks_{v}"] = sr_data[f"{p}_wks"]
-        if f"{p}_dys" in sr_data: st.session_state[f"sr_{p}_dys_{v}"] = sr_data[f"{p}_dys"]
-        if f"{p}_pct" in sr_data: st.session_state[f"sr_{p}_pct_{v}"] = sr_data[f"{p}_pct"]
+    if apply_new_data:
+        if 'bpd' in sr_data: st.session_state[f"sr_bpd_size_{v}"] = sr_data['bpd']
+        if 'hc' in sr_data: st.session_state[f"sr_hc_size_{v}"] = sr_data['hc']
+        if 'ac' in sr_data: st.session_state[f"sr_ac_size_{v}"] = sr_data['ac']
+        if 'fl' in sr_data: st.session_state[f"sr_fl_size_{v}"] = sr_data['fl']
+        if 'hl' in sr_data: st.session_state[f"sr_hl_size_{v}"] = sr_data['hl']
+        
+        for p in ["bpd", "hc", "ac", "fl", "hl"]:
+            if f"{p}_wks" in sr_data: st.session_state[f"sr_{p}_wks_{v}"] = sr_data[f"{p}_wks"]
+            if f"{p}_dys" in sr_data: st.session_state[f"sr_{p}_dys_{v}"] = sr_data[f"{p}_dys"]
+            if f"{p}_pct" in sr_data: st.session_state[f"sr_{p}_pct_{v}"] = sr_data[f"{p}_pct"]
 
-    if 'msd' in sr_data: st.session_state[f"sr_msd_{v}"] = sr_data['msd']
-    if 'crl' in sr_data: st.session_state[f"sr_crl_{v}"] = sr_data['crl']
-    if 'nt' in sr_data: st.session_state[f"sr_nt_{v}"] = sr_data['nt']
-    if 'nasal_bone' in sr_data: st.session_state[f"sr_nasal_bone_{v}"] = sr_data['nasal_bone']
-    if 'fetal_weight' in sr_data: st.session_state[f"sr_fetal_weight_{v}"] = sr_data['fetal_weight']
-    if 'fhr' in sr_data: st.session_state[f"sr_fhr_{v}"] = sr_data['fhr']
-    if 'mean_age' in sr_data: st.session_state[f"sr_mean_age_{v}"] = sr_data['mean_age']
-    
-    if 'edd_lmp' in sr_data: st.session_state[f"sr_edd_lmp_{v}"] = sr_data['edd_lmp']
-    if 'edd_cua' in sr_data: st.session_state[f"sr_edd_cua_{v}"] = sr_data['edd_cua']
-    if 'lmp' in sr_data: st.session_state[f"sr_lmp_{v}"] = sr_data['lmp']
-    
-    if 'ga_lmp_days' in sr_data: 
-        st.session_state[f"sr_ga_lmp_{v}"] = f"{sr_data['ga_lmp_days']//7}w{sr_data['ga_lmp_days']%7}d"
+        if 'msd' in sr_data: st.session_state[f"sr_msd_{v}"] = sr_data['msd']
+        if 'crl' in sr_data: st.session_state[f"sr_crl_{v}"] = sr_data['crl']
+        if 'nt' in sr_data: st.session_state[f"sr_nt_{v}"] = sr_data['nt']
+        if 'nasal_bone' in sr_data: st.session_state[f"sr_nasal_bone_{v}"] = sr_data['nasal_bone']
+        if 'fetal_weight' in sr_data: st.session_state[f"sr_fetal_weight_{v}"] = sr_data['fetal_weight']
+        if 'fhr' in sr_data: st.session_state[f"sr_fhr_{v}"] = sr_data['fhr']
+        if 'mean_age' in sr_data: st.session_state[f"sr_mean_age_{v}"] = sr_data['mean_age']
+        
+        if 'edd_lmp' in sr_data: st.session_state[f"sr_edd_lmp_{v}"] = sr_data['edd_lmp']
+        if 'edd_cua' in sr_data: st.session_state[f"sr_edd_cua_{v}"] = sr_data['edd_cua']
+        if 'lmp' in sr_data: st.session_state[f"sr_lmp_{v}"] = sr_data['lmp']
+        
+        if 'ga_lmp_days' in sr_data: 
+            st.session_state[f"sr_ga_lmp_{v}"] = f"{sr_data['ga_lmp_days']//7}w{sr_data['ga_lmp_days']%7}d"
 
-    if 'umbilical_pi' in sr_data: st.session_state[f"sr_umbilical_pi_{v}"] = sr_data['umbilical_pi']
-    if 'uterine_pi' in sr_data: st.session_state[f"sr_uterine_pi_{v}"] = sr_data['uterine_pi']
+        if 'umbilical_pi' in sr_data: st.session_state[f"sr_umbilical_pi_{v}"] = sr_data['umbilical_pi']
+        if 'uterine_pi' in sr_data: st.session_state[f"sr_uterine_pi_{v}"] = sr_data['uterine_pi']
+        
+        # Mark this version as applied so we don't overwrite manual edits on the next click!
+        st.session_state["last_applied_version"] = v
     # --------------------------
     lmp_not_sure = st.checkbox("LMP Not Sure / Not Known")
     if lmp_not_sure:
