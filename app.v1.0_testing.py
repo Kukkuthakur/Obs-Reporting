@@ -888,6 +888,8 @@ with col1:
                 c1, c2, c3, c4, c5 = st.columns([2, 1, 1, 1, 3])
                 c1.markdown(f"**{p_name}**")
                 
+                # Streamlit requires the 'value' parameter to be passed ONLY on the first render.
+                # By using the 'key', we allow manual overrides.
                 data[f"{p_key}_size"] = c2.text_input(f"{p_key} size", value=st.session_state.get(f"sr_{p_key}_size_{v}", ""), key=f"sr_{p_key}_size_{v}", label_visibility="collapsed")
                 data[f"{p_key}_wks"] = c3.text_input(f"{p_key} wks", value=st.session_state.get(f"sr_{p_key}_wks_{v}", ""), key=f"sr_{p_key}_wks_{v}", label_visibility="collapsed")
                 data[f"{p_key}_dys"] = c4.text_input(f"{p_key} dys", value=st.session_state.get(f"sr_{p_key}_dys_{v}", ""), key=f"sr_{p_key}_dys_{v}", label_visibility="collapsed")
