@@ -896,7 +896,7 @@ with col1:
                 if pct_val:
                     bar_img = generate_percentile_bar(pct_val)
                     if bar_img:
-                        c5.image(bar_img, use_column_width=True)
+                        c5.image(bar_img, use_container_width=True)
                         c5.caption(f"{pct_val}%")
                 else:
                     c5.text_input(f"{p_key} pct", value="", key=f"sr_{p_key}_pct_display_{v}", label_visibility="collapsed")
@@ -918,11 +918,18 @@ with col1:
                 if data.get("fl_size") and data.get("ac_size"):
                     fl_ac_val = (float(data["fl_size"]) / float(data["ac_size"])) * 100
                     st.session_state[f"sr_fl_ac_{v}"] = f"{fl_ac_val:.1f}%"
-            except:
+           except:
                 pass
 
+            # --- CRITICAL FIX: Pull calculated percentiles from session_state into data dict ---
+            for p in ["bpd", "hc", "ac", "fl", "hl"]:
+                # Grab whatever is in the session state box
+                pct_box_val = st.session_state.get(f"sr_{p}_pct_{v}", "")
+                # If the DICOM gave us a percentile, use it. Otherwise, use the box value.
+                if pct_box_val:
+                    data[f"{p}_pct"] = pct_box_val
+
             data["fl_hc"] = b1.text_input("FL/HC", value=st.session_state.get(f"sr_fl_hc_{v}", ""), key=f"sr_fl_hc_{v}")
-            data["hc_ac"] = b2.text_input("HC/AC", value=st.session_state.get(f"sr_hc_ac_{v}", ""), key=f"sr_hc_ac_{v}")
             
             b1, b2 = st.columns(2)
             data["fl_bpd"] = b1.text_input("FL/BPD", value=st.session_state.get(f"sr_fl_bpd_{v}", ""), key=f"sr_fl_bpd_{v}")
