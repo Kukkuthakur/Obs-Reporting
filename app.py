@@ -84,8 +84,7 @@ def calculate_uta_pi(pi: float, ga_weeks: int):
     elif pi >= p95: pct = 95.0
     elif pi <= p50: pct = 5.0 + 45.0 * (pi - p5) / (p50 - p5)
     else: pct = 50.0 + 45.0 * (pi - p50) / (p95 - p50)
-    z = math.sqrt(2) * math.erfinv(2 * (pct / 100.0) - 1)
-    return {"z_score": round(z, 2), "percentile": round(pct, 1)}
+    return {"z_score": 0.0, "percentile": round(pct, 1)}
 
 # ============================================================
 # DICOM SR PARSER
@@ -676,10 +675,14 @@ with col1:
     col_up, col_ref = st.columns([2, 1])
     
     with col_up:
-        uploaded_sr = st.file_uploader("Auto-Fill from File", type=["dcm", "dicom", "ima", ""], label_visibility="collapsed")
+        uploaded_sr = st.file_uploader("Auto-Fill from File", type=["dcm", "dicom", "ima", "json"], label_visibility="collapsed")
         if uploaded_sr is not None:
             try:
-                ds = pydicom.dcmread(io.BytesIO(uploaded_sr.read()))
+                if uploaded_sr.name.endswith('.json'):
+                    st.session_state["sr_data"] = json.load(uploaded_sr)
+                else:
+                    ds = pydicom.dcmread(io.BytesIO(uploaded_sr.read()))
+                    st.session_state["sr_data"] = extract_sr_data(ds)
                 st.session_state["sr_data"] = extract_sr_data(ds)
                 st.session_state["dicom_version"] += 1  # Force refresh
                 st.session_state["last_json_mtime"] = None # Ignore old listener file
@@ -689,6 +692,7 @@ with col1:
                 
     with col_ref:
         if st.button("🔄 Refresh from Listener", use_container_width=True):
+            st.session_state["last_json_mtime"] = None  # Forces the app to look at the file again
             st.rerun()
             
     # Check for automated listener file
