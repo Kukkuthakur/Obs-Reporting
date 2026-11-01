@@ -415,8 +415,12 @@ def build_docx_bytes(data, template_id):
             add_run(bio_table.cell(i, 3).paragraphs[0], f"{dys}days±2w" if dys else "", italic=True, size=10)
             
             pct_val = data.get(f"{param}_pct", "")
-            if pct_val:
-                bar_img = generate_percentile_bar(pct_val)
+            # Check if pct_val is actually a number before passing it to the chart
+            if pct_val and str(pct_val).strip() != "":
+                try:
+                    bar_img = generate_percentile_bar(pct_val)
+                except:
+                    bar_img = None
                 if bar_img:
                     cell = bio_table.cell(i, 4)
                     p_img = cell.paragraphs[0]
