@@ -520,7 +520,17 @@ def build_docx_bytes(data, template_id):
         # --- FETAL WEIGHT WITH BAR ---
         p = doc.add_paragraph()
         add_run(p, "FETAL WEIGHT : ", bold=True)
-        add_run(p, f"{data.get('fetal_weight', '')}g", italic=True)
+        
+        # Calculate the ± 15% error margin
+        fw_str = f"{data.get('fetal_weight', '')}g"
+        try:
+            fw_val = float(data.get('fetal_weight', ''))
+            error_margin = int(round(fw_val * 0.15))
+            fw_str = f"{int(fw_val)} GRAMS ± {error_margin}GMS"
+        except:
+            pass # If no weight is entered, just leave it blank
+            
+        add_run(p, fw_str, italic=True)
         if data.get("fetal_weight_pct"):
             p.add_run("  (Percentile: ")
             p.add_run(f"{data.get('fetal_weight_pct')}%)")
@@ -535,8 +545,17 @@ def build_docx_bytes(data, template_id):
             afi_val = data.get('afi_total', ''); desc, is_abn = generate_afi_text(afi_val, is_total=True)
             afi_str = desc if desc == "Nil, Not a single pocket of even one cm seen" else f"{desc}, total of four quadrants measures {afi_val} cm"
         else:
-            afi_val = data.get('afi_pocket', ''); desc, is_abn = generate_afi_text(afi_val, is_total=False)
-            afi_str = f"largest pocket measures {afi_val} cm" if not desc else f"{desc}, largest pocket measures {afi_val} cm"
+            afi_val = data.get('afi_pocket', '')
+            try:
+                afi_float = float(afi_val)
+                if 2.0 <= afi_float <= 8.0:
+                    afi_str = f"Adequate, largest pocket measures {afi_val} cm"
+                elif afi_float < 2.0:
+                    afi_str = f"Reduced, largest pocket measures {afi_val} cm"
+                else:
+                    afi_str = f"Increased, largest pocket measures {afi_val} cm"
+            except:
+                afi_str = f"largest pocket measures {afi_val} cm"
         add_run(p, afi_str, bold=is_abn, italic=is_abn)
 
         p = doc.add_paragraph()
@@ -700,7 +719,15 @@ def render_ob_preview(data, template_id):
         lines.append(f"MEAN AGE : {data.get('mean_age', '')}")
         
         # FETAL WEIGHT PREVIEW
-        fw_line = f"FETAL WEIGHT : {data.get('fetal_weight', '')}g"
+        fw_str_prev = f"{data.get('fetal_weight', '')}g"
+        try:
+            fw_val_prev = float(data.get('fetal_weight', ''))
+            err_prev = int(round(fw_val_prev * 0.15))
+            fw_str_prev = f"{int(fw_val_prev)} GRAMS ± {err_prev}GMS"
+        except:
+            pass
+            
+        fw_line = f"FETAL WEIGHT : {fw_str_prev}"
         if data.get("fetal_weight_pct"):
             fw_line += f" (Percentile: {data.get('fetal_weight_pct')}%)"
         lines.append(fw_line)
@@ -710,8 +737,17 @@ def render_ob_preview(data, template_id):
             afi_val = data.get('afi_total', ''); desc, _ = generate_afi_text(afi_val, is_total=True)
             afi_str = desc if desc == "Nil, Not a single pocket of even one cm seen" else f"{desc}, total of four quadrants measures {afi_val} cm"
         else:
-            afi_val = data.get('afi_pocket', ''); desc, _ = generate_afi_text(afi_val, is_total=False)
-            afi_str = f"largest pocket measures {afi_val} cm" if not desc else f"{desc}, largest pocket measures {afi_val} cm"
+            afi_val = data.get('afi_pocket', '')
+            try:
+                afi_float = float(afi_val)
+                if 2.0 <= afi_float <= 8.0:
+                    afi_str = f"Adequate, largest pocket measures {afi_val} cm"
+                elif afi_float < 2.0:
+                    afi_str = f"Reduced, largest pocket measures {afi_val} cm"
+                else:
+                    afi_str = f"Increased, largest pocket measures {afi_val} cm"
+            except:
+                afi_str = f"largest pocket measures {afi_val} cm"
         lines.append(f"AFI:- {afi_str}")
         lines.append(f"Foetal heart rate is approx. {data.get('fhr', '')}.")
         lines.append("")
