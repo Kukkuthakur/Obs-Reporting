@@ -560,7 +560,6 @@ def build_docx_bytes(data, template_id):
                 p.add_run().add_picture(bar_img_efw, width=Cm(3.0))
 
         p = doc.add_paragraph()
-        p = doc.add_paragraph()
         add_run(p, "AFI:- ", bold=True)
         afi_method = data.get('afi_method', 'Total 4 Quadrants')
         
