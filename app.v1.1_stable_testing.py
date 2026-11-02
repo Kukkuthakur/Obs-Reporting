@@ -762,7 +762,6 @@ def render_ob_preview(data, template_id):
             afi_val = data.get('afi_total', ''); desc, _ = generate_afi_text(afi_val, is_total=True)
             afi_str = desc if desc == "Nil, Not a single pocket of even one cm seen" else f"{desc}, total of four quadrants measures {afi_val} cm"
         else:
-            else:
             afi_val = data.get('afi_pocket', '')
             try:
                 afi_float = float(afi_val)
