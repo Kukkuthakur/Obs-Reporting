@@ -360,18 +360,33 @@ def build_docx_bytes(data, template_id):
     add_run(demo_table.cell(0, 1).paragraphs[0], f"DATE :- {data.get('report_date', '')}", bold=True)
     add_run(demo_table.cell(1, 0).paragraphs[0], f"AGE/SEX :- {data.get('patient_age', '')}Y/ {data.get('p_sex', 'F')}", bold=True)
     add_run(demo_table.cell(1, 1).paragraphs[0], f"REF. BY:- {data.get('referred_by', '')}", bold=True)
-    doc.add_paragraph().paragraph_format.space_after = Pt(10)
+    
+    # 8pt gap
+    p_gap1 = doc.add_paragraph()
+    p_gap1.paragraph_format.space_after = Pt(0)
+    p_gap1.paragraph_format.line_spacing = Pt(8)
 
     # 2. TITLE
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     add_run(title_p, "ULTRASOUND OBSTETRICS REPORT", bold=True, underline=True, size=14, color=RGBColor(0x1F, 0x4E, 0x79))
+    
+    # 5pt gap
+    p_gap2 = doc.add_paragraph()
+    p_gap2.paragraph_format.space_after = Pt(0)
+    p_gap2.paragraph_format.line_spacing = Pt(5)
+    
     lmp_p = doc.add_paragraph()
+    lmp_p.paragraph_format.space_after = Pt(0)
     if data.get('lmp') == "Not Sure":
         add_run(lmp_p, f"LMP- {data.get('lmp', '')}", bold=False, italic=True)
     else:
         add_run(lmp_p, f"LMP- {data.get('lmp', '')}", bold=True)
-    doc.add_paragraph()
+        
+    # 5pt gap
+    p_gap3 = doc.add_paragraph()
+    p_gap3.paragraph_format.space_after = Pt(0)
+    p_gap3.paragraph_format.line_spacing = Pt(5)
 
     # 3. EARLY OBS
     if template_id == "EARLY_OBS":
@@ -468,7 +483,11 @@ def build_docx_bytes(data, template_id):
         add_run(p, f"Uterus shows single live fetus. Fetus is in ")
         add_run(p, f"{pres_text}", bold=True, italic=True)
         add_run(p, f" at the time of scanning. Fetal movements are present. Fetal cardiac pulsations are appreciated.")
-        doc.add_paragraph()
+        
+        # 8pt gap
+        p_gap4 = doc.add_paragraph()
+        p_gap4.paragraph_format.space_after = Pt(0)
+        p_gap4.paragraph_format.line_spacing = Pt(8)
 
         bio_head = doc.add_paragraph()
         add_run(bio_head, "BIO PHYSICAL PARAMETERS:", bold=True, underline=True)
@@ -504,7 +523,8 @@ def build_docx_bytes(data, template_id):
                     p_txt.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     if p_txt.runs:
                         p_txt.runs[0].font.size = Pt(8)
-        doc.add_paragraph()
+                        
+        # (Removed doc.add_paragraph() here to make them flush)
 
         ratio_table = doc.add_table(rows=1, cols=2)
         ratio_table.alignment = WD_TABLE_ALIGNMENT.LEFT
@@ -513,7 +533,8 @@ def build_docx_bytes(data, template_id):
         add_run(ratio_table.cell(0, 0).paragraphs[0], f"{data.get('fl_hc', '')}", italic=True)
         add_run(ratio_table.cell(0, 1).paragraphs[0], "HC/AC = ", bold=True)
         add_run(ratio_table.cell(0, 1).paragraphs[0], f"{data.get('hc_ac', '')} (BOTH WNL)", italic=True)
-        doc.add_paragraph()
+        
+        # (Removed doc.add_paragraph() here to make them flush)
 
         p = doc.add_paragraph()
         add_run(p, "MEAN AGE : ", bold=True); add_run(p, f"{data.get('mean_age', '')}", italic=True)
