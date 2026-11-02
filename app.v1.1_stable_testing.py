@@ -336,6 +336,19 @@ def build_docx_bytes(data, template_id):
     style.paragraph_format.space_after = Pt(0)
     style.paragraph_format.space_before = Pt(0)
 
+    # === FLEXIBLE TOP SPACER ===
+    # Adds exactly 2 blank lines (11pt) above the patient demographics box
+    # to leave room for pre-printed stationery/letterhead.
+    for _ in range(2):
+        _p = doc.add_paragraph()
+        _p.paragraph_format.space_after = Pt(0)
+        _p.paragraph_format.space_before = Pt(0)
+        _p.paragraph_format.line_spacing = 1.0
+        _run = _p.add_run("")
+        _run.font.name = "Calibri"
+        _run.font.size = Pt(11)
+    # === END SPACER ===
+
     # 1. HEADER TABLE
     demo_table = doc.add_table(rows=2, cols=2)
     demo_table.alignment = WD_TABLE_ALIGNMENT.CENTER
