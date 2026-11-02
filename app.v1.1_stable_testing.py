@@ -563,24 +563,24 @@ def build_docx_bytes(data, template_id):
         add_run(p, "AFI:- ", bold=True)
         afi_method = data.get('afi_method', 'Total 4 Quadrants')
         if afi_method == "Total 4 Quadrants":
-            afi_val = data.get('afi_total', ''); desc, is_abn = generate_afi_text(afi_val, is_total=True)
-            afi_str = desc if desc == "Nil, Not a single pocket of even one cm seen" else f"{desc}, total of four quadrants measures {afi_val} cm"
+            afi_val = data.get('afi_total', '')
+            desc, _ = generate_afi_text(afi_val, is_total=True)
+            if desc == "Nil, Not a single pocket of even one cm seen":
+                afi_str = desc
+            else:
+                afi_str = f"{desc}, total of four quadrants measures {afi_val} cm"
         else:
             afi_val = data.get('afi_pocket', '')
             try:
                 afi_float = float(afi_val)
                 if 2.0 <= afi_float <= 8.0:
                     afi_str = f"Adequate, largest pocket measures {afi_val} cm"
-                    is_abn = False
                 elif afi_float < 2.0:
                     afi_str = f"Reduced, largest pocket measures {afi_val} cm"
-                    is_abn = True
                 else:
                     afi_str = f"Increased, largest pocket measures {afi_val} cm"
-                    is_abn = True
             except:
                 afi_str = f"largest pocket measures {afi_val} cm"
-                is_abn = False
                 
         add_run(p, afi_str, bold=is_abn, italic=is_abn)
         p = doc.add_paragraph()
