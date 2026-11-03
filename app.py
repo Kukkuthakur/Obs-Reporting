@@ -678,22 +678,28 @@ def build_docx_bytes(data, template_id):
         _edd_lmp = data.get('edd_lmp', '')
         _edd_cua = data.get('edd_cua', '')
         
-        # 2. Build the table
-        edd_table = doc.add_table(rows=2, cols=3)
+        # 2. Determine if we need 1 or 2 rows based on LMP status
+        if _lmp_val == "Not Sure":
+            edd_data = [("EDD (CUA)--", _edd_cua, "±2W")]
+            num_rows = 1
+        else:
+            edd_data = [
+                ("EDD (LMP)--", _edd_lmp, "±2W"),
+                ("EDD (CUA)--", _edd_cua, "±2W"),
+            ]
+            num_rows = 2
+
+        # 3. Build the table
+        edd_table = doc.add_table(rows=num_rows, cols=3)
         set_table_borders(edd_table)
         
-        # 3. Set widths
+        # 4. Set widths
         for row in edd_table.rows:
             row.cells[0].width = Cm(3.5)
             row.cells[1].width = Cm(5.0)
             row.cells[2].width = Cm(3.0)
             
-        edd_data = [
-            ("EDD (LMP)--", _edd_lmp if _lmp_val != "Not Sure" else "-", "±2W"),
-            ("EDD (CUA)--", _edd_cua, "±2W"),
-        ]
-        
-        # 4. Fill the cells with formatting
+        # 5. Fill the cells with formatting
         for i, (label, date, err) in enumerate(edd_data):
             cell_0 = edd_table.cell(i, 0)
             cell_1 = edd_table.cell(i, 1)
@@ -909,11 +915,12 @@ def render_ob_preview(data, template_id):
         _edd_lmp = data.get('edd_lmp', '')
         _edd_cua = data.get('edd_cua', '')
         
-        lines.append(f"  {'EDD (LMP)--':<18}: {_edd_lmp if _lmp_val != 'Not Sure' else '-'}    ±2W")
+        if _lmp_val != 'Not Sure':
+            lines.append(f"  {'EDD (LMP)--':<18}: {_edd_lmp}    ±2W")
+            
         lines.append(f"  {'EDD (CUA)--':<18}: {_edd_cua}    ±2W")
         lines.append("")
         # -----------------------
-
         plac_pos = data.get('placenta_pos', 'ANTERIOR'); plac_os = data.get('placenta_os', 'away from the Os')
         if plac_os == "Placenta Praevia": plac_str = f"is {plac_pos} and Placenta Praevia ({data.get('praevia_grade', 'Grade I')})."
         elif plac_os == "Low-lying":
