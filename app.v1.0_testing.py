@@ -779,16 +779,9 @@ def build_docx_bytes(data, template_id, sr_data=None):
         # --- DOPPLER SECTION (GREEN & COMPACT) ---
         if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
             
-            # --- THE ULTIMATE FIX: GRAB DIRECTLY FROM SESSION STATE ---
-            # We don't care what `data` or `sr_data` has. We go straight to the source.
-            for _key in ["umbilical_sd", "umbilical_ri", "uterine_sd", "uterine_ri", "mca_sd", "mca_ri"]:
-                # Loop through ALL possible version keys in session state
-                for _v in range(st.session_state.get("dicom_version", 0) + 1):
-                    _val = st.session_state.get(f"sr_{_key}_{_v}", "")
-                    if _val:
-                        data[_key] = _val # Inject it straight into the data dict!
+            # Values are now correctly passed via data dict, thanks to the UI boxes
+            pass 
             # -----------------------------------------------------------
-
             doc.add_paragraph()
             doppler_head = doc.add_paragraph()
             add_run(doppler_head, "COLOR DOPPLER INDICES:", bold=True, underline=True)
@@ -1535,6 +1528,20 @@ with col1:
             else:
                 data["mca_sd"] = ""
                 data["mca_ri"] = ""
+            st.markdown("*Doppler Waveform Indices (auto-filled)*")
+            w1, w2, w3, w4 = st.columns(4)
+            data["umbilical_sd"] = w1.text_input("Umb S/D", value=st.session_state.get(f"sr_umbilical_sd_{v}", ""), key=f"sr_umbilical_sd_{v}")
+            data["umbilical_ri"] = w2.text_input("Umb RI", value=st.session_state.get(f"sr_umbilical_ri_{v}", ""), key=f"sr_umbilical_ri_{v}")
+            data["uterine_sd"] = w3.text_input("Ut S/D", value=st.session_state.get(f"sr_uterine_sd_{v}", ""), key=f"sr_uterine_sd_{v}")
+            data["uterine_ri"] = w4.text_input("Ut RI", value=st.session_state.get(f"sr_uterine_ri_{v}", ""), key=f"sr_uterine_ri_{v}")
+            
+            # Same for MCA if present
+            if mca_present:
+                data["mca_sd"] = st.text_input("MCA S/D", value=st.session_state.get(f"sr_mca_sd_{v}", ""), key=f"sr_mca_sd_{v}")
+                data["mca_ri"] = st.text_input("MCA RI", value=st.session_state.get(f"sr_mca_ri_{v}", ""), key=f"sr_mca_ri_{v}")
+            else:
+                data["mca_sd"] = ""
+                data["mca_ri"] = ""
 
             # --- NEW CRITICAL FIX: PUSH S/D AND RI DIRECTLY FROM SR_DATA ---
             data["umbilical_sd"] = sr_data.get('umbilical_sd', st.session_state.get(f"sr_umbilical_sd_{v}", ""))
@@ -1680,8 +1687,12 @@ with col2:
     st.markdown(f'<div class="preview-box">{_safe}</div>', unsafe_allow_html=True)
 
     st.subheader("⬇️ Download Report")
-    # Pass sr_data directly to bypass the stale dictionary issue
-    docx_bytes = build_docx_bytes(data, template_id, sr_data) 
+    
+    # --- THE ULTIMATE FIX ---
+    # We re-fetch the session state right here to guarantee it is perfectly fresh.
+    final_sr_data = st.session_state.get("sr_data", {})
+    
+    docx_bytes = build_docx_bytes(data, template_id, final_sr_data) 
     st.download_button(
         label="Download Word Document",
         data=docx_bytes,
