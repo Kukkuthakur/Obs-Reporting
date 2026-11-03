@@ -848,10 +848,19 @@ def build_docx_bytes(data, template_id):
             # --- Populate Rows ---
             # 1. Umbilical Artery
             if data.get("umbilical_pi"):
+                # We must grab it from session_state because `data` might be stale here
+                _v = st.session_state.get("dicom_version", 0)
+                _umb_sd = st.session_state.get(f"sr_umbilical_sd_{_v}", "")
+                _umb_ri = st.session_state.get(f"sr_umbilical_ri_{_v}", "")
+                
+                # If session state is empty, fallback to data dict
+                if not _umb_sd: _umb_sd = data.get("umbilical_sd", "")
+                if not _umb_ri: _umb_ri = data.get("umbilical_ri", "")
+                
                 add_dop_row(
                     "Umbilical Artery", 
-                    data.get("umbilical_sd", ""), 
-                    data.get("umbilical_ri", ""), 
+                    _umb_sd, 
+                    _umb_ri, 
                     data.get("umbilical_pi", ""), 
                     data.get("umbilical_pct", ""), 
                     "", # CPR left blank here, calculated on MCA row
