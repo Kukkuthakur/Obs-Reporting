@@ -294,8 +294,15 @@ def add_run(paragraph, text, bold=False, italic=False, size=11, underline=False,
     run.bold = bold
     run.italic = italic
     run.underline = underline
+    
     if color is not None:
         run.font.color.rgb = color
+        # Force the XML to use the color
+        rPr = run._element.get_or_add_rPr()
+        c = OxmlElement('w:color')
+        c.set(qn('w:val'), str(color))
+        rPr.append(c)
+        
     return run
 
 def set_cell_background(cell, hex_color):
