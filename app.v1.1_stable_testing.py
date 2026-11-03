@@ -655,24 +655,48 @@ def build_docx_bytes(data, template_id):
                 
         add_run(p, afi_str, bold=is_abn, italic=is_abn)
         p = doc.add_paragraph()
-        p = doc.add_paragraph()
         add_run(p, "Foetal heart rate ", bold=True); add_run(p, f"is approx. {data.get('fhr', '')}.", italic=True)
         doc.add_paragraph()
 
         # --- EDD TABLE ---
+        # 1. Safely get the EDDs. If they are empty, use a dash.
+        _lmp_val = data.get('lmp', '')
+        _edd_lmp = data.get('edd_lmp', '')
+        _edd_cua = data.get('edd_cua', '')
+        
+        # 2. Build the table
         edd_table = doc.add_table(rows=2, cols=3)
         set_table_borders(edd_table)
+        
+        # 3. Set widths
         for row in edd_table.rows:
-            row.cells[0].width = Cm(3.5); row.cells[1].width = Cm(5.0); row.cells[2].width = Cm(3.0)
+            row.cells[0].width = Cm(3.5)
+            row.cells[1].width = Cm(5.0)
+            row.cells[2].width = Cm(3.0)
+            
         edd_data = [
-            ("EDD (LMP)--", data.get('edd_lmp', '') if data.get('lmp') != "Not Sure" else "-", "±2W"),
-            ("EDD (CUA)--", data.get('edd_cua', ''), "±2W"),
+            ("EDD (LMP)--", _edd_lmp if _lmp_val != "Not Sure" else "-", "±2W"),
+            ("EDD (CUA)--", _edd_cua, "±2W"),
         ]
+        
+        # 4. Fill the cells with formatting
         for i, (label, date, err) in enumerate(edd_data):
-            add_run(edd_table.cell(i, 0).paragraphs[0], label, bold=True, italic=True, size=10)
-            add_run(edd_table.cell(i, 1).paragraphs[0], date, italic=True, size=10)
-            add_run(edd_table.cell(i, 2).paragraphs[0], err, italic=True, size=10)
+            cell_0 = edd_table.cell(i, 0)
+            cell_1 = edd_table.cell(i, 1)
+            cell_2 = edd_table.cell(i, 2)
+            
+            # Clear default paragraph
+            cell_0.text = ""
+            cell_1.text = ""
+            cell_2.text = ""
+            
+            add_run(cell_0.paragraphs[0], label, bold=True, italic=True, size=10)
+            add_run(cell_1.paragraphs[0], str(date), italic=True, size=10)
+            add_run(cell_2.paragraphs[0], err, italic=True, size=10)
+            
+        # 5. Add a gap after the table so it doesn't collide with the Doppler section
         doc.add_paragraph()
+        # --- END EDD TABLE ---
 
         # --- DOPPLER SECTION WITH TABLE ---
         if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
