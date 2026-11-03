@@ -749,112 +749,140 @@ def build_docx_bytes(data, template_id):
         doc.add_paragraph()
         # --- END EDD TABLE ---
 
-        # --- DOPPLER SECTION WITH DYNAMIC TABLE ---
+        # --- DOPPLER SECTION (GREEN & COMPACT) ---
         if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
             doc.add_paragraph()
             doppler_head = doc.add_paragraph()
-            add_run(doppler_head, "DOPPLER INDICES:", bold=True, underline=True)
+            add_run(doppler_head, "COLOR DOPPLER INDICES:", bold=True, underline=True)
             
-            # Check if MCA is present
-            mca_present = bool(data.get("mca_pi"))
-            
-            # Create a horizontal table: Vessel | Value | Notching | Percentile (| MCA Percentile)
-            num_cols = 5 if mca_present else 4
-            dop_table = doc.add_table(rows=1, cols=num_cols)
+            # Create a 7-column table (Added CPR)
+            dop_table = doc.add_table(rows=1, cols=7)
             set_table_borders(dop_table)
             dop_table.alignment = WD_TABLE_ALIGNMENT.CENTER
             
-            # Set column widths dynamically
-            if mca_present:
-                dop_widths = [Cm(3.5), Cm(2.0), Cm(2.5), Cm(4.5), Cm(4.5)]
-            else:
-                dop_widths = [Cm(4.0), Cm(2.0), Cm(3.0), Cm(6.0)]
+            # Column widths (Compact)
+            dop_widths = [Cm(3.8), Cm(1.2), Cm(1.2), Cm(1.2), Cm(4.5), Cm(3.0), Cm(2.5)]
+            headers = ["Vessels", "S/D", "RI", "PI", "PI Percentile", "CPR", "Remarks"]
             
-            # 1. Header Row
-            headers = ["Vessel", "PI Value", "Notching", "Percentile"]
-            if mca_present:
-                headers.append("MCA (Percentile)")
-                
+            # 1. Header Row (Green Gradient)
             for i, text in enumerate(headers):
                 cell = dop_table.cell(0, i)
                 cell.width = dop_widths[i]
-                set_cell_background(cell, get_gradient_color(0))
-                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                set_cell_background(cell, get_gradient_color(0)) # Green Header
+                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER if i > 0 else WD_ALIGN_PARAGRAPH.LEFT
                 add_run(cell.paragraphs[0], text, bold=True, size=10)
             
-            # 2. Build the rows for each vessel
             row_idx = 1
-            def add_doppler_row(vessel_name, pi_val, notching_text, pct_val, mca_pct_val=""):
+            
+            def add_dop_row(vessel, sd, ri, pi, pct, cpr, remark):
                 nonlocal row_idx
                 row_cells = dop_table.add_row().cells
-                bg_color = get_gradient_color(row_idx)
+                bg_color = get_gradient_color(row_idx) # Green Gradient Body
                 
-                # Vessel Name
-                row_cells[0].width = dop_widths[0]
-                set_cell_background(row_cells[0], bg_color)
-                add_run(row_cells[0].paragraphs[0], vessel_name, size=10)
-                
-                # PI Value
-                row_cells[1].width = dop_widths[1]
-                set_cell_background(row_cells[1], bg_color)
-                row_cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                add_run(row_cells[1].paragraphs[0], pi_val if pi_val else "-", size=10)
-                
-                # Notching
-                row_cells[2].width = dop_widths[2]
-                set_cell_background(row_cells[2], bg_color)
-                row_cells[2].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                add_run(row_cells[2].paragraphs[0], notching_text if notching_text else "-", size=10)
-                
-                # Percentile (Text + Bar)
-                row_cells[3].width = dop_widths[3]
-                set_cell_background(row_cells[3], bg_color)
-                row_cells[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
-                if pct_val:
-                    try:
-                        bar_img = generate_percentile_bar(pct_val)
-                        if bar_img:
-                            p = row_cells[3].paragraphs[0]
-                            p.paragraph_format.space_after = Pt(0)
-                            add_run(p, f"{pct_val}% ", bold=True, size=9)
-                            p.add_run().add_picture(bar_img, width=Cm(2.5))
-                    except:
-                        pass
-                else:
-                    add_run(row_cells[3].paragraphs[0], "-", size=10)
+                vals = [vessel, sd, ri, pi, pct, cpr, remark]
+                for i, val in enumerate(vals):
+                    cell = row_cells[i]
+                    cell.width = dop_widths[i]
+                    set_cell_background(cell, bg_color)
                     
-                # 5th Column (MCA only)
-                if mca_present:
-                    row_cells[4].width = dop_widths[4]
-                    set_cell_background(row_cells[4], bg_color)
-                    row_cells[4].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    
-                    if vessel_name == "MCA" and mca_pct_val:
-                        try:
-                            bar_img = generate_percentile_bar(mca_pct_val)
-                            if bar_img:
-                                p = row_cells[4].paragraphs[0]
-                                p.paragraph_format.space_after = Pt(0)
-                                add_run(p, f"{mca_pct_val}% ", bold=True, size=9)
-                                p.add_run().add_picture(bar_img, width=Cm(2.5))
-                        except:
-                            pass
+                    if i == 0 or i == 6: # Left align Vessel and Remarks
+                        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
                     else:
-                        add_run(row_cells[4].paragraphs[0], "-", size=10)
-                
+                        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        
+                    if i == 4 and pct: # PI Percentile Bar
+                        try:
+                            bar_img = generate_percentile_bar(pct)
+                            if bar_img:
+                                p = cell.paragraphs[0]
+                                p.paragraph_format.space_after = Pt(0)
+                                p.paragraph_format.line_spacing = 1.0
+                                add_run(p, f"{pct}% ", bold=True, size=9)
+                                p.add_run().add_picture(bar_img, width=Cm(2.5))
+                        except: pass
+                    else:
+                        add_run(cell.paragraphs[0], str(val) if val else "-", size=10)
+                        
                 row_idx += 1
             
-            # Add the specific vessels
+            # --- Populate Rows ---
+            # 1. Umbilical Artery
             if data.get("umbilical_pi"):
-                add_doppler_row("Umbilical Artery", data.get("umbilical_pi"), "", data.get("umbilical_pct"))
+                add_dop_row(
+                    "Umbilical Artery", 
+                    data.get("umbilical_sd", ""), 
+                    data.get("umbilical_ri", ""), 
+                    data.get("umbilical_pi", ""), 
+                    data.get("umbilical_pct", ""), 
+                    "", # CPR left blank here, calculated on MCA row
+                    "Within Normal Limit"
+                )
+            
+            # 2. Right Uterine Artery
+            if data.get("uterine_right_pi"):
+                add_dop_row(
+                    "Right Uterine Artery", 
+                    data.get("uterine_right_sd", ""), 
+                    data.get("uterine_right_ri", ""), 
+                    data.get("uterine_right_pi", ""), 
+                    data.get("uterine_right_pct", ""), 
+                    "", 
+                    "Within Normal Limit"
+                )
                 
+            # 3. Left Uterine Artery
+            if data.get("uterine_left_pi"):
+                add_dop_row(
+                    "Left Uterine Artery", 
+                    data.get("uterine_left_sd", ""), 
+                    data.get("uterine_left_ri", ""), 
+                    data.get("uterine_left_pi", ""), 
+                    data.get("uterine_left_pct", ""), 
+                    "", 
+                    "Within Normal Limit"
+                )
+            
+            # 4. Mean Uterine Artery
             if data.get("uterine_pi"):
-                notching = data.get("uterine_notching", "No notching")
-                add_doppler_row("Uterine Artery", data.get("uterine_pi"), notching, data.get("uterine_pct"))
+                add_dop_row(
+                    "Uterine Arteries\nMean PI = ", 
+                    "", 
+                    "", 
+                    data.get("uterine_pi", ""), 
+                    data.get("uterine_pct", ""), 
+                    "", 
+                    "Normal"
+                )
                 
-            if mca_present:
-                add_doppler_row("MCA", data.get("mca_pi"), "", data.get("mca_pct"), data.get("mca_pct"))
+            # 5. MCA & CPR
+            if data.get("mca_pi"):
+                # Calculate CPR
+                cpr_val = ""
+                cpr_pct = ""
+                if data.get("umbilical_pi"):
+                    try:
+                        umb = float(data.get("umbilical_pi"))
+                        mca = float(data.get("mca_pi"))
+                        if umb > 0:
+                            cpr_float = mca / umb
+                            cpr_val = f"{cpr_float:.2f}"
+                            # Simple CPR threshold for remark
+                            if cpr_float < 1.0:
+                                cpr_remark = "Low CPR"
+                            else:
+                                cpr_remark = "Normal CPR"
+                    except:
+                        pass
+
+                add_dop_row(
+                    "Middle Cerebral Artery", 
+                    data.get("mca_sd", ""), 
+                    data.get("mca_ri", ""), 
+                    data.get("mca_pi", ""), 
+                    data.get("mca_pct", ""), 
+                    cpr_val, 
+                    "Within Normal Limit"
+                )
 
     # 5. IMPRESSION
     doc.add_paragraph()
@@ -1437,6 +1465,23 @@ with col1:
                     if bar_ua: b1.image(bar_ua, use_container_width=True)
                 except: pass
                 
+            # Calculate Left Uterine PI Percentile
+            if data.get("uterine_left_pi"):
+                try:
+                    res_left = calculate_uta_pi(float(data["uterine_left_pi"]), int(round(data["ga_weeks_dop"])))
+                    if res_left:
+                        data["uterine_left_pct"] = str(res_left['percentile'])
+                except: pass
+
+            # Calculate Right Uterine PI Percentile
+            if data.get("uterine_right_pi"):
+                try:
+                    res_right = calculate_uta_pi(float(data["uterine_right_pi"]), int(round(data["ga_weeks_dop"])))
+                    if res_right:
+                        data["uterine_right_pct"] = str(res_right['percentile'])
+                except: pass
+
+            # Calculate Mean Uterine PI Percentile
             if data.get("uterine_pi"):
                 try:
                     res = calculate_uta_pi(float(data["uterine_pi"]), int(round(data["ga_weeks_dop"])))
@@ -1446,7 +1491,6 @@ with col1:
                         bar_uta = generate_percentile_bar(res['percentile'])
                         if bar_uta: b2.image(bar_uta, use_container_width=True)
                 except: pass
-
     if template_id == "EARLY_OBS":
         with st.expander("Early OBS Details", expanded=True):
             data["cardiac_status"] = st.selectbox("Cardiac Activity", ["Present", "Not yet appreciable", "Blighted Ovum"])
