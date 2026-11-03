@@ -565,7 +565,7 @@ def build_docx_bytes(data, template_id):
             cell3.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             add_run(cell3.paragraphs[0], dys if dys else "", size=10)
             
-            # Col 4: Percentile Chart
+            # Col 4: Percentile Chart (Text next to the bar to save space)
             cell4 = bio_table.cell(row_i, 4)
             cell4.width = widths[4]
             set_cell_background(cell4, bg_color)
@@ -578,15 +578,14 @@ def build_docx_bytes(data, template_id):
                 except:
                     bar_img = None
                 if bar_img:
-                    run = cell4.paragraphs[0].add_run()
-                    run.add_picture(bar_img, width=Cm(3.2))
-                    # Add percentage text next to the bar
-                    p_txt = cell4.add_paragraph(f"{pct_val}%")
-                    p_txt.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    if p_txt.runs:
-                        p_txt.runs[0].font.size = Pt(8)
-                        p_txt.paragraph_format.space_before = Pt(0)
-                        p_txt.paragraph_format.space_after = Pt(0)
+                    p = cell4.paragraphs[0]
+                    
+                    # Add the percentage text FIRST, then the image
+                    add_run(p, f"{pct_val}%  ", bold=True, size=9)
+                    
+                    # Add the image
+                    run = p.add_run()
+                    run.add_picture(bar_img, width=Cm(3.5))
         # --- END BIOMETRY TABLE ---
                         
         # (Removed doc.add_paragraph() here to make them flush)
@@ -889,6 +888,16 @@ def render_ob_preview(data, template_id):
         lines.append(f"AFI:- {afi_str}")
         lines.append(f"Foetal heart rate is approx. {data.get('fhr', '')}.")
         lines.append("")
+
+        # --- EDD PREVIEW FIX ---
+        _lmp_val = data.get('lmp', '')
+        _edd_lmp = data.get('edd_lmp', '')
+        _edd_cua = data.get('edd_cua', '')
+        
+        lines.append(f"  {'EDD (LMP)--':<18}: {_edd_lmp if _lmp_val != 'Not Sure' else '-'}    ±2W")
+        lines.append(f"  {'EDD (CUA)--':<18}: {_edd_cua}    ±2W")
+        lines.append("")
+        # -----------------------
 
         plac_pos = data.get('placenta_pos', 'ANTERIOR'); plac_os = data.get('placenta_os', 'away from the Os')
         if plac_os == "Placenta Praevia": plac_str = f"is {plac_pos} and Placenta Praevia ({data.get('praevia_grade', 'Grade I')})."
