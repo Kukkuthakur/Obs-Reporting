@@ -365,6 +365,16 @@ def build_docx_bytes(data, template_id):
         _run = _p.add_run("")
         _run.font.name = "Calibri"
         _run.font.size = Pt(11)
+        
+    # Adds 2 more blank lines (10pt) to push the report down further
+    for _ in range(2):
+        _p = doc.add_paragraph()
+        _p.paragraph_format.space_after = Pt(0)
+        _p.paragraph_format.space_before = Pt(0)
+        _p.paragraph_format.line_spacing = 1.0
+        _run = _p.add_run("")
+        _run.font.name = "Calibri"
+        _run.font.size = Pt(10)
     # === END SPACER ===
 
     # 1. HEADER TABLE
