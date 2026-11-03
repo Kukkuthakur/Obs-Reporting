@@ -375,7 +375,9 @@ def generate_doppler_text(data):
         doppler_lines.append(f"MCA: PI = {data.get('mca_pi')}")
     return "\n".join(doppler_lines)
 
-def build_docx_bytes(data, template_id):
+def build_docx_bytes(data, template_id, sr_data=None):
+    if sr_data is None:
+        sr_data = {}
     doc = Document()
     section = doc.sections[0]
     section.page_height = Cm(29.7)
@@ -848,14 +850,8 @@ def build_docx_bytes(data, template_id):
             # --- Populate Rows ---
             # 1. Umbilical Artery
             if data.get("umbilical_pi"):
-                # We must grab it from session_state because `data` might be stale here
-                _v = st.session_state.get("dicom_version", 0)
-                _umb_sd = st.session_state.get(f"sr_umbilical_sd_{_v}", "")
-                _umb_ri = st.session_state.get(f"sr_umbilical_ri_{_v}", "")
-                
-                # If session state is empty, fallback to data dict
-                if not _umb_sd: _umb_sd = data.get("umbilical_sd", "")
-                if not _umb_ri: _umb_ri = data.get("umbilical_ri", "")
+                _umb_sd = sr_data.get("umbilical_sd", data.get("umbilical_sd", ""))
+                _umb_ri = sr_data.get("umbilical_ri", data.get("umbilical_ri", ""))
                 
                 add_dop_row(
                     "Umbilical Artery", 
@@ -1684,7 +1680,8 @@ with col2:
     st.markdown(f'<div class="preview-box">{_safe}</div>', unsafe_allow_html=True)
 
     st.subheader("⬇️ Download Report")
-    docx_bytes = build_docx_bytes(data, template_id)
+    # Pass sr_data directly to bypass the stale dictionary issue
+    docx_bytes = build_docx_bytes(data, template_id, sr_data) 
     st.download_button(
         label="Download Word Document",
         data=docx_bytes,
