@@ -365,6 +365,16 @@ def build_docx_bytes(data, template_id):
         _run = _p.add_run("")
         _run.font.name = "Calibri"
         _run.font.size = Pt(11)
+        
+    # Adds 2 more blank lines (10pt) to push the report down further
+    for _ in range(2):
+        _p = doc.add_paragraph()
+        _p.paragraph_format.space_after = Pt(0)
+        _p.paragraph_format.space_before = Pt(0)
+        _p.paragraph_format.line_spacing = 1.0
+        _run = _p.add_run("")
+        _run.font.name = "Calibri"
+        _run.font.size = Pt(10)
     # === END SPACER ===
 
     # 1. HEADER TABLE
@@ -1038,6 +1048,18 @@ with c4: p_date = st.text_input("Date", value=datetime.now().strftime("%d-%b-%y"
 with c5: p_ref = st.text_input("Referred by")
 
 data = {"patient_name": p_name, "patient_age": p_age, "report_date": p_date, "referred_by": p_ref, "p_sex": p_sex}
+
+# --- NEW PATIENT BUTTON ---
+if st.button("🚀 Start New Patient / Clear Form", type="primary"):
+    # Clear the DICOM data
+    st.session_state["sr_data"] = {}
+    st.session_state["dicom_version"] += 1
+    # Clear the input fields by deleting their session state keys
+    for key in list(st.session_state.keys()):
+        if key.startswith("sr_") or key in ["p_name_input", "p_age_input"]:
+            del st.session_state[key]
+    st.rerun()
+# ---------------------------
 
 col1, col2 = st.columns([1, 1], gap="large")
 
