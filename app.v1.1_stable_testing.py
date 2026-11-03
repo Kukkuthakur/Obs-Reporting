@@ -288,7 +288,25 @@ def add_run(paragraph, text, bold=False, italic=False, size=11, underline=False,
         run.font.color.rgb = color
     return run
 
-def generate_afi_text(afi_val, is_total=True):
+def set_cell_background(cell, hex_color):
+    """Sets the background shading of a table cell."""
+    tcPr = cell._tc.get_or_add_tcPr()
+    shd = OxmlElement('w:shd')
+    shd.set(qn('w:val'), 'clear')
+    shd.set(qn('w:color'), 'auto')
+    shd.set(qn('w:fill'), hex_color)
+    tcPr.append(shd)
+
+def get_gradient_color(row_index, total_rows=6):
+    """Returns a light green alternating gradient hex code."""
+    # Base light green is E8F5E9. Darker is C8E6C9.
+    # We alternate to keep it readable like the reference image.
+    if row_index == 0:
+        return "A5D6A7" # Header: Darker Green
+    elif row_index % 2 == 1:
+        return "E8F5E9" # Row 1: Lighter
+    else:
+        return "D3EAD5" # Row 2: Slightly darkerdef generate_afi_text(afi_val, is_total=True):
     try:
         val = float(afi_val)
     except (ValueError, TypeError):
@@ -493,36 +511,83 @@ def build_docx_bytes(data, template_id):
         add_run(bio_head, "BIO PHYSICAL PARAMETERS:", bold=True, underline=True)
         bio_head.paragraph_format.space_after = Pt(6)
 
-        bio_table = doc.add_table(rows=5, cols=5)
+        # --- NEW COMPACT COLORED BIOMETRY TABLE ---
+        bio_table = doc.add_table(rows=6, cols=5)
         set_table_borders(bio_table)
-        for row in bio_table.rows:
-            row.cells[0].width = Cm(3.5); row.cells[1].width = Cm(2.5); row.cells[2].width = Cm(2.5); row.cells[3].width = Cm(2.5); row.cells[4].width = Cm(5.0)
+        bio_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        
+        # 1. Header Row
+        headers = ["Fetal growth parameters", "mm", "Weeks", "Days", "Percentile"]
+        widths = [Cm(4.5), Cm(1.5), Cm(1.5), Cm(1.5), Cm(5.5)] # Condensed widths
+        for i, text in enumerate(headers):
+            cell = bio_table.cell(0, i)
+            cell.width = widths[i]
+            set_cell_background(cell, get_gradient_color(0))
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i > 0 else WD_ALIGN_PARAGRAPH.LEFT
+            add_run(p, text, bold=True, size=10)
+
+        # 2. Data Rows
         params = ["bpd", "hc", "ac", "fl", "hl"]
-        for i, param in enumerate(params):
+        param_names = ["Biparietal Diameter", "Head circumference", "Abdominal Circumference", "Femoral Length", "Humerus Length"]
+        
+        for row_idx, param in enumerate(params):
+            row_i = row_idx + 1 # Offset by 1 for header
             size = data.get(f"{param}_size", ""); wks = data.get(f"{param}_wks", ""); dys = data.get(f"{param}_dys", "")
-            add_run(bio_table.cell(i, 0).paragraphs[0], param.upper(), bold=True, italic=True, size=10)
-            add_run(bio_table.cell(i, 1).paragraphs[0], f"{size}mm" if size else "", italic=True, size=10)
-            add_run(bio_table.cell(i, 2).paragraphs[0], f"{wks}weeks" if wks else "", italic=True, size=10)
-            add_run(bio_table.cell(i, 3).paragraphs[0], f"{dys}days±2w" if dys else "", italic=True, size=10)
+            
+            # Row background color
+            bg_color = get_gradient_color(row_i)
+            
+            # Col 0: Parameter Name
+            cell0 = bio_table.cell(row_i, 0)
+            cell0.width = widths[0]
+            set_cell_background(cell0, bg_color)
+            add_run(cell0.paragraphs[0], param_names[row_idx], size=10)
+            
+            # Col 1: Size (mm)
+            cell1 = bio_table.cell(row_i, 1)
+            cell1.width = widths[1]
+            set_cell_background(cell1, bg_color)
+            cell1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            add_run(cell1.paragraphs[0], size if size else "", size=10)
+            
+            # Col 2: Weeks
+            cell2 = bio_table.cell(row_i, 2)
+            cell2.width = widths[2]
+            set_cell_background(cell2, bg_color)
+            cell2.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            add_run(cell2.paragraphs[0], wks if wks else "", size=10)
+            
+            # Col 3: Days
+            cell3 = bio_table.cell(row_i, 3)
+            cell3.width = widths[3]
+            set_cell_background(cell3, bg_color)
+            cell3.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            add_run(cell3.paragraphs[0], dys if dys else "", size=10)
+            
+            # Col 4: Percentile Chart
+            cell4 = bio_table.cell(row_i, 4)
+            cell4.width = widths[4]
+            set_cell_background(cell4, bg_color)
+            cell4.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             
             pct_val = data.get(f"{param}_pct", "")
-            # Check if pct_val is actually a number before passing it to the chart
             if pct_val and str(pct_val).strip() != "":
                 try:
                     bar_img = generate_percentile_bar(pct_val)
                 except:
                     bar_img = None
                 if bar_img:
-                    cell = bio_table.cell(i, 4)
-                    p_img = cell.paragraphs[0]
-                    p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    run = p_img.add_run()
-                    run.add_picture(bar_img, width=Cm(3.5))
-                    
-                    p_txt = cell.add_paragraph(f"{pct_val}%")
+                    run = cell4.paragraphs[0].add_run()
+                    run.add_picture(bar_img, width=Cm(3.2))
+                    # Add percentage text next to the bar
+                    p_txt = cell4.add_paragraph(f"{pct_val}%")
                     p_txt.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     if p_txt.runs:
                         p_txt.runs[0].font.size = Pt(8)
+                        p_txt.paragraph_format.space_before = Pt(0)
+                        p_txt.paragraph_format.space_after = Pt(0)
+        # --- END BIOMETRY TABLE ---
                         
         # (Removed doc.add_paragraph() here to make them flush)
 
