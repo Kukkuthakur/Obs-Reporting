@@ -776,6 +776,17 @@ def build_docx_bytes(data, template_id):
 
         # --- DOPPLER SECTION (GREEN & COMPACT) ---
         if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
+            
+            # --- THE ULTIMATE FIX: GRAB DIRECTLY FROM SESSION STATE ---
+            # We don't care what `data` or `sr_data` has. We go straight to the source.
+            for _key in ["umbilical_sd", "umbilical_ri", "uterine_sd", "uterine_ri", "mca_sd", "mca_ri"]:
+                # Loop through ALL possible version keys in session state
+                for _v in range(st.session_state.get("dicom_version", 0) + 1):
+                    _val = st.session_state.get(f"sr_{_key}_{_v}", "")
+                    if _val:
+                        data[_key] = _val # Inject it straight into the data dict!
+            # -----------------------------------------------------------
+
             doc.add_paragraph()
             doppler_head = doc.add_paragraph()
             add_run(doppler_head, "COLOR DOPPLER INDICES:", bold=True, underline=True)
