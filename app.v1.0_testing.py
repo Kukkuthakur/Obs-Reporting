@@ -1479,6 +1479,25 @@ with col1:
                 data["uterine_pi"] = b2.text_input("Mean Uterine PI", value=mean_ut_pi, key=f"sr_uterine_pi_mean_{v}")
                 data["mca_pi"] = "" # Ensure it stays blank if not present
 
+            # --- NEW CRITICAL FIX: PUSH S/D AND RI DIRECTLY FROM SR_DATA ---
+            data["umbilical_sd"] = sr_data.get('umbilical_sd', "")
+            data["umbilical_ri"] = sr_data.get('umbilical_ri', "")
+            
+            data["uterine_left_pi"] = sr_data.get('uterine_left_pi', "")
+            data["uterine_left_sd"] = sr_data.get('uterine_left_sd', "")
+            data["uterine_left_ri"] = sr_data.get('uterine_left_ri', "")
+            
+            data["uterine_right_pi"] = sr_data.get('uterine_right_pi', "")
+            data["uterine_right_sd"] = sr_data.get('uterine_right_sd', "")
+            data["uterine_right_ri"] = sr_data.get('uterine_right_ri', "")
+            
+            data["uterine_sd"] = sr_data.get('uterine_sd', "")
+            data["uterine_ri"] = sr_data.get('uterine_ri', "")
+            
+            data["mca_sd"] = sr_data.get('mca_sd', "")
+            data["mca_ri"] = sr_data.get('mca_ri', "")
+            # ---------------------------------------------------------------
+
             # --- NEW: Push S/D and RI to the final data dict for Word Doc ---
             data["umbilical_sd"] = st.session_state.get(f"sr_umbilical_sd_{v}", "")
             data["umbilical_ri"] = st.session_state.get(f"sr_umbilical_ri_{v}", "")
