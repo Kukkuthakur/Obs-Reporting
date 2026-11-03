@@ -177,23 +177,48 @@ def extract_sr_data(ds):
             if concept == 'Nasal Bone':
                 extracted['nasal_bone'] = "Present" if num_val > 0 else "Absent"
             
-            # Doppler (Handles Umbilical, Uterine, MCA properly)
-            if concept == 'Pulsatility Index':
-                if "Umbilical" in site or "Fetal" in site:
-                    extracted['umbilical_pi'] = str(round(num_val, 2))
-                elif "Uterine" in site or "Maternal" in site:
-                    # Check for Laterality to separate Left vs Right
-                    lat = ""
-                    if 'ConceptNameCodeSequence' in item:
-                        pass # Laterality is usually in the parent group
-                    
-                    # If we already have a uterine_pi, this must be the other side
-                    if 'uterine_pi' in extracted:
-                        extracted['uterine_pi_right'] = str(round(num_val, 2))
+            # --- BULLETPROOF DOPPLER INDICES PARSER ---
+            concept_lower = concept.lower()
+            
+            # 1. Determine the Vessel
+            vessel = None
+            if "umbilical" in site.lower() or "umbilical" in concept_lower:
+                vessel = "umbilical"
+            elif "uterine" in site.lower() or "uterine" in concept_lower:
+                vessel = "uterine"
+            elif "mca" in site.lower() or "cerebral" in site.lower() or "mca" in concept_lower:
+                vessel = "mca"
+
+            # 2. Determine the Measurement Type and Save
+            if vessel:
+                val_str = str(round(num_val, 2))
+                
+                if "pulsatility" in concept_lower or concept_lower == "pi":
+                    if vessel == "uterine":
+                        if 'uterine_pi' in extracted:
+                            extracted['uterine_pi_right'] = val_str
+                        else:
+                            extracted['uterine_pi'] = val_str
                     else:
-                        extracted['uterine_pi'] = str(round(num_val, 2))
-                elif "MCA" in site:
-                    extracted['mca_pi'] = str(round(num_val, 2))
+                        extracted[f'{vessel}_pi'] = val_str
+                        
+                elif "resistivity" in concept_lower or concept_lower == "ri":
+                    if vessel == "uterine":
+                        if 'uterine_ri' in extracted:
+                            extracted['uterine_right_ri'] = val_str
+                        else:
+                            extracted['uterine_ri'] = val_str
+                    else:
+                        extracted[f'{vessel}_ri'] = val_str
+                        
+                elif "systolic to diastolic" in concept_lower or "s/d" in concept_lower:
+                    if vessel == "uterine":
+                        if 'uterine_sd' in extracted:
+                            extracted['uterine_right_sd'] = val_str
+                        else:
+                            extracted['uterine_sd'] = val_str
+                    else:
+                        extracted[f'{vessel}_sd'] = val_str
 
             # Summary & Ratios
             if concept == 'Estimated Weight': 
@@ -1480,8 +1505,8 @@ with col1:
                 data["mca_pi"] = "" # Ensure it stays blank if not present
 
             # --- NEW CRITICAL FIX: PUSH S/D AND RI DIRECTLY FROM SR_DATA ---
-            data["umbilical_sd"] = sr_data.get('umbilical_sd', "")
-            data["umbilical_ri"] = sr_data.get('umbilical_ri', "")
+            data["umbilical_sd"] = sr_data.get('umbilical_sd', st.session_state.get(f"sr_umbilical_sd_{v}", ""))
+            data["umbilical_ri"] = sr_data.get('umbilical_ri', st.session_state.get(f"sr_umbilical_ri_{v}", ""))
             
             data["uterine_left_pi"] = sr_data.get('uterine_left_pi', "")
             data["uterine_left_sd"] = sr_data.get('uterine_left_sd', "")
@@ -1491,13 +1516,12 @@ with col1:
             data["uterine_right_sd"] = sr_data.get('uterine_right_sd', "")
             data["uterine_right_ri"] = sr_data.get('uterine_right_ri', "")
             
-            data["uterine_sd"] = sr_data.get('uterine_sd', "")
-            data["uterine_ri"] = sr_data.get('uterine_ri', "")
+            data["uterine_sd"] = sr_data.get('uterine_sd', st.session_state.get(f"sr_uterine_sd_{v}", ""))
+            data["uterine_ri"] = sr_data.get('uterine_ri', st.session_state.get(f"sr_uterine_ri_{v}", ""))
             
-            data["mca_sd"] = sr_data.get('mca_sd', "")
-            data["mca_ri"] = sr_data.get('mca_ri', "")
+            data["mca_sd"] = sr_data.get('mca_sd', st.session_state.get(f"sr_mca_sd_{v}", ""))
+            data["mca_ri"] = sr_data.get('mca_ri', st.session_state.get(f"sr_mca_ri_{v}", ""))
             # ---------------------------------------------------------------
-
             # --- NEW: Push S/D and RI to the final data dict for Word Doc ---
             data["umbilical_sd"] = st.session_state.get(f"sr_umbilical_sd_{v}", "")
             data["umbilical_ri"] = st.session_state.get(f"sr_umbilical_ri_{v}", "")
