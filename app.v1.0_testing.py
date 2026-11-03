@@ -837,21 +837,21 @@ def build_docx_bytes(data, template_id):
                                 p.add_run().add_picture(bar_img, width=Cm(2.5))
                         except: pass
                     else:
-                        add_run(cell.paragraphs[0], str(val) if val else "-", size=10)
+                        # FORCE it to print the exact value from the data dict
+                        _val_to_print = str(val) if val is not None else "-"
+                        if _val_to_print.strip() == "":
+                            _val_to_print = "-"
+                        add_run(cell.paragraphs[0], _val_to_print, size=10)
                         
                 row_idx += 1
             
             # --- Populate Rows ---
             # 1. Umbilical Artery
             if data.get("umbilical_pi"):
-                # Pull S/D and RI directly from sr_data if they exist
-                _umb_sd = sr_data.get('umbilical_sd', data.get('umbilical_sd', ''))
-                _umb_ri = sr_data.get('umbilical_ri', data.get('umbilical_ri', ''))
-                
                 add_dop_row(
                     "Umbilical Artery", 
-                    _umb_sd, 
-                    _umb_ri, 
+                    data.get("umbilical_sd", ""), 
+                    data.get("umbilical_ri", ""), 
                     data.get("umbilical_pi", ""), 
                     data.get("umbilical_pct", ""), 
                     "", # CPR left blank here, calculated on MCA row
