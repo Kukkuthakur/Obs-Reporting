@@ -859,7 +859,7 @@ def build_docx_bytes(data, template_id):
     # 5. IMPRESSION
     doc.add_paragraph()
     imp_head = doc.add_paragraph()
-    add_run(imp_head, "IMPRESSION:", bold=True, underline=True)
+    add_run(imp_head, "IMPRESSION:", bold=True, underline=True, color=RGBColor(0x1F, 0x4E, 0x79))
     mean_age = data.get('mean_age', '')
     if template_id == "EARLY_OBS":
         if data.get('cardiac_status') == "Blighted Ovum":
