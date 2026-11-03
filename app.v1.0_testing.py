@@ -1239,7 +1239,11 @@ with col1:
             # --- CRITICAL FIX: Pull calculated percentiles from session_state into data dict ---
             for p in ["bpd", "hc", "ac", "fl", "hl"]:
                 pct_box_val = st.session_state.get(f"sr_{p}_pct_edit_{v}", "")
-                if pct_box_val:
+                
+                # If LMP is "Not Sure", we send empty data to the document/preview
+                if lmp_not_sure:
+                    data[f"{p}_pct"] = ""
+                elif pct_box_val:
                     data[f"{p}_pct"] = pct_box_val
 
             data["fl_hc"] = b1.text_input("FL/HC", value=st.session_state.get(f"sr_fl_hc_{v}", ""), key=f"sr_fl_hc_{v}")
@@ -1257,7 +1261,11 @@ with col1:
             # Streamlit doesn't update the data dictionary automatically when you change a widget with a key. 
             # We have to pull it directly from session_state right before building the doc.
             efw_pct_val = b2.text_input("EFW Percentile (%)", value=st.session_state.get(f"sr_fetal_weight_pct_{v}", ""), key=f"sr_fetal_weight_pct_edit_{v}")
-            data["fetal_weight_pct"] = efw_pct_val
+            
+            if lmp_not_sure:
+                data["fetal_weight_pct"] = ""
+            else:
+                data["fetal_weight_pct"] = efw_pct_val
             if efw_pct_val:
                 bar_efw = generate_percentile_bar(efw_pct_val)
                 if bar_efw: b2.image(bar_efw, use_container_width=True)
