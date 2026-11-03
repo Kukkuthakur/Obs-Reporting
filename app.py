@@ -856,17 +856,21 @@ def build_docx_bytes(data, template_id):
         imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text} presentation of approx. {mean_age} gestation age."
     p = doc.add_paragraph(); add_run(p, imp_text, bold=True, italic=True)
 
-    # 6. PNDT
+    # 6. PNDT & NOTE COMBINED BOX
     doc.add_paragraph()
     disc_table = doc.add_table(rows=1, cols=1)
     disc_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(disc_table)
-    cell = disc_table.cell(0, 0); p = cell.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    cell = disc_table.cell(0, 0)
+    p = cell.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    
+    # First Line: PNDT Disclaimer
     add_run(p, '"The radiologist has not conducted or caused to conduct any pre natal diagnostic technique (sonography) for the purpose of determining the sex of the foetus. No person including the person conducting the diagnostic procedure has communicated to the pregnant woman concerned or her relatives or any other person the sex of the foetus by words, signs, or in any other manner."', bold=True, italic=True, size=8)
     
-    doc.add_paragraph()
-    note_p = doc.add_paragraph(); note_p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    add_run(note_p, "Note:- This is a obstetrical ultrasound, mainly done for estimation of gestational age, amount of liquor, placental position and general well-being of the fetus. Moreover, the anomalies in relation to fetal heart and limbs are extremely difficult to assess due to constantly changing position of the fetus and overlapping of its various parts.", bold=True, italic=True, size=8)
+    # Add a line break, then the Note
+    p.add_run().add_break()
+    add_run(p, "Note:- This is a obstetrical ultrasound, mainly done for estimation of gestational age, amount of liquor, placental position and general well-being of the fetus. Moreover, the anomalies in relation to fetal heart and limbs are extremely difficult to assess due to constantly changing position of the fetus and overlapping of its various parts.", bold=True, italic=True, size=8)
 
     buf = io.BytesIO(); doc.save(buf); return buf.getvalue()
 
