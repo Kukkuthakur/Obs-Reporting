@@ -1524,6 +1524,22 @@ with col1:
                 data["uterine_pi"] = b2.text_input("Mean Uterine PI", value=mean_ut_pi, key=f"sr_uterine_pi_mean_{v}")
                 data["mca_pi"] = "" # Ensure it stays blank if not present
 
+            # --- THE ACTUAL FIX: REGISTER S/D AND RI SO STREAMLIT DOESNT LOSE THEM ---
+            st.markdown("*Doppler Waveform Indices (auto-filled)*")
+            w1, w2, w3, w4 = st.columns(4)
+            data["umbilical_sd"] = w1.text_input("Umb S/D", value=st.session_state.get(f"sr_umbilical_sd_{v}", ""), key=f"sr_umbilical_sd_{v}")
+            data["umbilical_ri"] = w2.text_input("Umb RI", value=st.session_state.get(f"sr_umbilical_ri_{v}", ""), key=f"sr_umbilical_ri_{v}")
+            data["uterine_sd"] = w3.text_input("Ut S/D", value=st.session_state.get(f"sr_uterine_sd_{v}", ""), key=f"sr_uterine_sd_{v}")
+            data["uterine_ri"] = w4.text_input("Ut RI", value=st.session_state.get(f"sr_uterine_ri_{v}", ""), key=f"sr_uterine_ri_{v}")
+            
+            # Same for MCA if present
+            if mca_present:
+                data["mca_sd"] = st.text_input("MCA S/D", value=st.session_state.get(f"sr_mca_sd_{v}", ""), key=f"sr_mca_sd_{v}")
+                data["mca_ri"] = st.text_input("MCA RI", value=st.session_state.get(f"sr_mca_ri_{v}", ""), key=f"sr_mca_ri_{v}")
+            else:
+                data["mca_sd"] = ""
+                data["mca_ri"] = ""
+
             # --- NEW CRITICAL FIX: PUSH S/D AND RI DIRECTLY FROM SR_DATA ---
             data["umbilical_sd"] = sr_data.get('umbilical_sd', st.session_state.get(f"sr_umbilical_sd_{v}", ""))
             data["umbilical_ri"] = sr_data.get('umbilical_ri', st.session_state.get(f"sr_umbilical_ri_{v}", ""))
