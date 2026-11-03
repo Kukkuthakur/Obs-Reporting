@@ -181,7 +181,16 @@ def extract_sr_data(ds):
                 if "Umbilical" in site or "Fetal" in site:
                     extracted['umbilical_pi'] = str(round(num_val, 2))
                 elif "Uterine" in site or "Maternal" in site:
-                    extracted['uterine_pi'] = str(round(num_val, 2))
+                    # Check for Laterality to separate Left vs Right
+                    lat = ""
+                    if 'ConceptNameCodeSequence' in item:
+                        pass # Laterality is usually in the parent group
+                    
+                    # If we already have a uterine_pi, this must be the other side
+                    if 'uterine_pi' in extracted:
+                        extracted['uterine_pi_right'] = str(round(num_val, 2))
+                    else:
+                        extracted['uterine_pi'] = str(round(num_val, 2))
                 elif "MCA" in site:
                     extracted['mca_pi'] = str(round(num_val, 2))
 
@@ -678,22 +687,28 @@ def build_docx_bytes(data, template_id):
         _edd_lmp = data.get('edd_lmp', '')
         _edd_cua = data.get('edd_cua', '')
         
-        # 2. Build the table
-        edd_table = doc.add_table(rows=2, cols=3)
+        # 2. Determine if we need 1 or 2 rows based on LMP status
+        if _lmp_val == "Not Sure":
+            edd_data = [("EDD (CUA)--", _edd_cua, "±2W")]
+            num_rows = 1
+        else:
+            edd_data = [
+                ("EDD (LMP)--", _edd_lmp, "±2W"),
+                ("EDD (CUA)--", _edd_cua, "±2W"),
+            ]
+            num_rows = 2
+
+        # 3. Build the table
+        edd_table = doc.add_table(rows=num_rows, cols=3)
         set_table_borders(edd_table)
         
-        # 3. Set widths
+        # 4. Set widths
         for row in edd_table.rows:
             row.cells[0].width = Cm(3.5)
             row.cells[1].width = Cm(5.0)
             row.cells[2].width = Cm(3.0)
             
-        edd_data = [
-            ("EDD (LMP)--", _edd_lmp if _lmp_val != "Not Sure" else "-", "±2W"),
-            ("EDD (CUA)--", _edd_cua, "±2W"),
-        ]
-        
-        # 4. Fill the cells with formatting
+        # 5. Fill the cells with formatting
         for i, (label, date, err) in enumerate(edd_data):
             cell_0 = edd_table.cell(i, 0)
             cell_1 = edd_table.cell(i, 1)
@@ -712,51 +727,112 @@ def build_docx_bytes(data, template_id):
         doc.add_paragraph()
         # --- END EDD TABLE ---
 
-        # --- DOPPLER SECTION WITH TABLE ---
+        # --- DOPPLER SECTION WITH DYNAMIC TABLE ---
         if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
             doc.add_paragraph()
             doppler_head = doc.add_paragraph()
             add_run(doppler_head, "DOPPLER INDICES:", bold=True, underline=True)
             
-            # A single, horizontal 3-column table to save space
-            dop_table = doc.add_table(rows=3, cols=3)
+            # Check if MCA is present
+            mca_present = bool(data.get("mca_pi"))
+            
+            # Create a horizontal table: Vessel | Value | Notching | Percentile (| MCA Percentile)
+            num_cols = 5 if mca_present else 4
+            dop_table = doc.add_table(rows=1, cols=num_cols)
             set_table_borders(dop_table)
             dop_table.alignment = WD_TABLE_ALIGNMENT.CENTER
             
-            # Row 0: Headers
-            hdr_cells = dop_table.rows[0].cells
-            add_run(hdr_cells[0].paragraphs[0], "Umbilical Artery", bold=True, size=10)
-            add_run(hdr_cells[1].paragraphs[0], "Uterine Artery", bold=True, size=10)
-            add_run(hdr_cells[2].paragraphs[0], "MCA", bold=True, size=10)
-            for cell in hdr_cells:
-                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-            # Row 1: Values
-            val_cells = dop_table.rows[1].cells
-            add_run(val_cells[0].paragraphs[0], f"PI = {data.get('umbilical_pi', '-')}", italic=True, size=10)
-            notching = data.get("uterine_notching", "No notching")
-            add_run(val_cells[1].paragraphs[0], f"PI = {data.get('uterine_pi', '-')} ({notching})", italic=True, size=10)
-            add_run(val_cells[2].paragraphs[0], f"PI = {data.get('mca_pi', '-')}", italic=True, size=10)
-            for cell in val_cells:
-                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-            # Row 2: Bars
-            pct_cells = dop_table.rows[2].cells
-            def draw_bar(cell, pct_val):
-                if pct_val:
-                    cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    bar_img = generate_percentile_bar(pct_val)
-                    if bar_img:
-                        cell.paragraphs[0].add_run().add_picture(bar_img, width=Cm(3.5))
-                    p_txt = cell.add_paragraph(f"{pct_val}%")
-                    p_txt.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    if p_txt.runs: p_txt.runs[0].font.size = Pt(8)
-                else:
-                    add_run(cell.paragraphs[0], "-", italic=True, size=10)
+            # Set column widths dynamically
+            if mca_present:
+                dop_widths = [Cm(3.5), Cm(2.0), Cm(2.5), Cm(4.5), Cm(4.5)]
+            else:
+                dop_widths = [Cm(4.0), Cm(2.0), Cm(3.0), Cm(6.0)]
             
-            draw_bar(pct_cells[0], data.get("umbilical_pct"))
-            draw_bar(pct_cells[1], data.get("uterine_pct"))
-            draw_bar(pct_cells[2], "")
+            # 1. Header Row
+            headers = ["Vessel", "PI Value", "Notching", "Percentile"]
+            if mca_present:
+                headers.append("MCA (Percentile)")
+                
+            for i, text in enumerate(headers):
+                cell = dop_table.cell(0, i)
+                cell.width = dop_widths[i]
+                set_cell_background(cell, get_gradient_color(0))
+                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                add_run(cell.paragraphs[0], text, bold=True, size=10)
+            
+            # 2. Build the rows for each vessel
+            row_idx = 1
+            def add_doppler_row(vessel_name, pi_val, notching_text, pct_val, mca_pct_val=""):
+                nonlocal row_idx
+                row_cells = dop_table.add_row().cells
+                bg_color = get_gradient_color(row_idx)
+                
+                # Vessel Name
+                row_cells[0].width = dop_widths[0]
+                set_cell_background(row_cells[0], bg_color)
+                add_run(row_cells[0].paragraphs[0], vessel_name, size=10)
+                
+                # PI Value
+                row_cells[1].width = dop_widths[1]
+                set_cell_background(row_cells[1], bg_color)
+                row_cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                add_run(row_cells[1].paragraphs[0], pi_val if pi_val else "-", size=10)
+                
+                # Notching
+                row_cells[2].width = dop_widths[2]
+                set_cell_background(row_cells[2], bg_color)
+                row_cells[2].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                add_run(row_cells[2].paragraphs[0], notching_text if notching_text else "-", size=10)
+                
+                # Percentile (Text + Bar)
+                row_cells[3].width = dop_widths[3]
+                set_cell_background(row_cells[3], bg_color)
+                row_cells[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                
+                if pct_val:
+                    try:
+                        bar_img = generate_percentile_bar(pct_val)
+                        if bar_img:
+                            p = row_cells[3].paragraphs[0]
+                            p.paragraph_format.space_after = Pt(0)
+                            add_run(p, f"{pct_val}% ", bold=True, size=9)
+                            p.add_run().add_picture(bar_img, width=Cm(2.5))
+                    except:
+                        pass
+                else:
+                    add_run(row_cells[3].paragraphs[0], "-", size=10)
+                    
+                # 5th Column (MCA only)
+                if mca_present:
+                    row_cells[4].width = dop_widths[4]
+                    set_cell_background(row_cells[4], bg_color)
+                    row_cells[4].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    
+                    if vessel_name == "MCA" and mca_pct_val:
+                        try:
+                            bar_img = generate_percentile_bar(mca_pct_val)
+                            if bar_img:
+                                p = row_cells[4].paragraphs[0]
+                                p.paragraph_format.space_after = Pt(0)
+                                add_run(p, f"{mca_pct_val}% ", bold=True, size=9)
+                                p.add_run().add_picture(bar_img, width=Cm(2.5))
+                        except:
+                            pass
+                    else:
+                        add_run(row_cells[4].paragraphs[0], "-", size=10)
+                
+                row_idx += 1
+            
+            # Add the specific vessels
+            if data.get("umbilical_pi"):
+                add_doppler_row("Umbilical Artery", data.get("umbilical_pi"), "", data.get("umbilical_pct"))
+                
+            if data.get("uterine_pi"):
+                notching = data.get("uterine_notching", "No notching")
+                add_doppler_row("Uterine Artery", data.get("uterine_pi"), notching, data.get("uterine_pct"))
+                
+            if mca_present:
+                add_doppler_row("MCA", data.get("mca_pi"), "", data.get("mca_pct"), data.get("mca_pct"))
 
     # 5. IMPRESSION
     doc.add_paragraph()
@@ -780,17 +856,21 @@ def build_docx_bytes(data, template_id):
         imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text} presentation of approx. {mean_age} gestation age."
     p = doc.add_paragraph(); add_run(p, imp_text, bold=True, italic=True)
 
-    # 6. PNDT
+    # 6. PNDT & NOTE COMBINED BOX
     doc.add_paragraph()
     disc_table = doc.add_table(rows=1, cols=1)
     disc_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(disc_table)
-    cell = disc_table.cell(0, 0); p = cell.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    cell = disc_table.cell(0, 0)
+    p = cell.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    
+    # First Line: PNDT Disclaimer
     add_run(p, '"The radiologist has not conducted or caused to conduct any pre natal diagnostic technique (sonography) for the purpose of determining the sex of the foetus. No person including the person conducting the diagnostic procedure has communicated to the pregnant woman concerned or her relatives or any other person the sex of the foetus by words, signs, or in any other manner."', bold=True, italic=True, size=8)
     
-    doc.add_paragraph()
-    note_p = doc.add_paragraph(); note_p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    add_run(note_p, "Note:- This is a obstetrical ultrasound, mainly done for estimation of gestational age, amount of liquor, placental position and general well-being of the fetus. Moreover, the anomalies in relation to fetal heart and limbs are extremely difficult to assess due to constantly changing position of the fetus and overlapping of its various parts.", bold=True, italic=True, size=8)
+    # Add a line break, then the Note
+    p.add_run().add_break()
+    add_run(p, "Note:- This is a obstetrical ultrasound, mainly done for estimation of gestational age, amount of liquor, placental position and general well-being of the fetus. Moreover, the anomalies in relation to fetal heart and limbs are extremely difficult to assess due to constantly changing position of the fetus and overlapping of its various parts.", bold=True, italic=True, size=8)
 
     buf = io.BytesIO(); doc.save(buf); return buf.getvalue()
 
@@ -909,11 +989,12 @@ def render_ob_preview(data, template_id):
         _edd_lmp = data.get('edd_lmp', '')
         _edd_cua = data.get('edd_cua', '')
         
-        lines.append(f"  {'EDD (LMP)--':<18}: {_edd_lmp if _lmp_val != 'Not Sure' else '-'}    ±2W")
+        if _lmp_val != 'Not Sure':
+            lines.append(f"  {'EDD (LMP)--':<18}: {_edd_lmp}    ±2W")
+            
         lines.append(f"  {'EDD (CUA)--':<18}: {_edd_cua}    ±2W")
         lines.append("")
         # -----------------------
-
         plac_pos = data.get('placenta_pos', 'ANTERIOR'); plac_os = data.get('placenta_os', 'away from the Os')
         if plac_os == "Placenta Praevia": plac_str = f"is {plac_pos} and Placenta Praevia ({data.get('praevia_grade', 'Grade I')})."
         elif plac_os == "Low-lying":
@@ -1274,11 +1355,35 @@ with col1:
             data["edd_lmp"] = b2.text_input("EDD (LMP)", value=st.session_state.get(f"sr_edd_lmp_{v}", ""), key=f"sr_edd_lmp_{v}")
             data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get(f"sr_edd_cua_{v}", ""), key=f"sr_edd_cua_{v}")
             
+            # --- DOPPLER CALCULATIONS ---
+            # 1. Calculate Mean Uterine PI
+            ut_pi_left = st.session_state.get(f"sr_uterine_pi_{v}", "")
+            ut_pi_right = st.session_state.get(f"sr_uterine_pi_right_{v}", "")
+            
+            mean_ut_pi = ut_pi_left
+            if ut_pi_left and ut_pi_right:
+                try:
+                    mean_val = (float(ut_pi_left) + float(ut_pi_right)) / 2.0
+                    mean_ut_pi = f"{mean_val:.2f}"
+                except:
+                    pass
+                    
+            # 2. Check if MCA is present in DICOM
+            mca_present = 'mca_pi' in sr_data
+            mca_val = sr_data.get('mca_pi', "")
+
             st.markdown("**Doppler Indices & Percentiles**")
-            b1, b2, b3 = st.columns(3)
-            data["umbilical_pi"] = b1.text_input("Umbilical PI", value=st.session_state.get(f"sr_umbilical_pi_{v}", ""), key=f"sr_umbilical_pi_{v}")
-            data["mca_pi"] = b2.text_input("MCA PI", value="", key=f"sr_mca_pi_{v}")
-            data["uterine_pi"] = b3.text_input("Mean Uterine PI", value=st.session_state.get(f"sr_uterine_pi_{v}", ""), key=f"sr_uterine_pi_{v}")
+            
+            if mca_present:
+                b1, b2, b3 = st.columns(3)
+                data["umbilical_pi"] = b1.text_input("Umbilical PI", value=st.session_state.get(f"sr_umbilical_pi_{v}", ""), key=f"sr_umbilical_pi_{v}")
+                data["uterine_pi"] = b2.text_input("Mean Uterine PI", value=mean_ut_pi, key=f"sr_uterine_pi_mean_{v}")
+                data["mca_pi"] = b3.text_input("MCA PI", value=mca_val, key=f"sr_mca_pi_{v}")
+            else:
+                b1, b2 = st.columns(2)
+                data["umbilical_pi"] = b1.text_input("Umbilical PI", value=st.session_state.get(f"sr_umbilical_pi_{v}", ""), key=f"sr_umbilical_pi_{v}")
+                data["uterine_pi"] = b2.text_input("Mean Uterine PI", value=mean_ut_pi, key=f"sr_uterine_pi_mean_{v}")
+                data["mca_pi"] = "" # Ensure it stays blank if not present
             
             data["uterine_notching"] = st.selectbox("Uterine Artery Notching", ["No notching", "Unilateral Notching", "Bilateral Notching"])
 
