@@ -306,7 +306,9 @@ def get_gradient_color(row_index, total_rows=6):
     elif row_index % 2 == 1:
         return "E8F5E9" # Row 1: Lighter
     else:
-        return "D3EAD5" # Row 2: Slightly darkerdef generate_afi_text(afi_val, is_total=True):
+        return "D3EAD5" # Row 2: Slightly darker
+
+def generate_afi_text(afi_val, is_total=True):
     try:
         val = float(afi_val)
     except (ValueError, TypeError):
