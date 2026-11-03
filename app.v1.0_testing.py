@@ -808,10 +808,14 @@ def build_docx_bytes(data, template_id):
             # --- Populate Rows ---
             # 1. Umbilical Artery
             if data.get("umbilical_pi"):
+                # Pull S/D and RI directly from sr_data if they exist
+                _umb_sd = sr_data.get('umbilical_sd', data.get('umbilical_sd', ''))
+                _umb_ri = sr_data.get('umbilical_ri', data.get('umbilical_ri', ''))
+                
                 add_dop_row(
                     "Umbilical Artery", 
-                    data.get("umbilical_sd", ""), 
-                    data.get("umbilical_ri", ""), 
+                    _umb_sd, 
+                    _umb_ri, 
                     data.get("umbilical_pi", ""), 
                     data.get("umbilical_pct", ""), 
                     "", # CPR left blank here, calculated on MCA row
