@@ -842,12 +842,17 @@ def build_docx_bytes(data, template_id):
                     "Within Normal Limit"
                 )
             
-            # 4. Mean Uterine Artery
+            # 4. Uterine Artery (Check if we have both sides to call it "Mean")
             if data.get("uterine_pi"):
+                if data.get("uterine_left_pi") and data.get("uterine_right_pi"):
+                    _ut_label = "Uterine Arteries\nMean PI = "
+                else:
+                    _ut_label = "Uterine Artery" # Fallback if only one was sent
+                    
                 add_dop_row(
-                    "Uterine Arteries\nMean PI = ", 
-                    "", 
-                    "", 
+                    _ut_label, 
+                    data.get("uterine_left_sd", ""), # Will be blank if not sent
+                    data.get("uterine_left_ri", ""), # Will be blank if not sent
                     data.get("uterine_pi", ""), 
                     data.get("uterine_pct", ""), 
                     "", 
@@ -1292,8 +1297,27 @@ with col1:
         if 'umbilical_pi' in sr_data: st.session_state[f"sr_umbilical_pi_{v}"] = sr_data['umbilical_pi']
         if 'uterine_pi' in sr_data: st.session_state[f"sr_uterine_pi_{v}"] = sr_data['uterine_pi']
         
-        st.session_state["last_applied_version"] = v
+        # --- NEW: Pass S/D and RI values to the UI ---
+        if 'umbilical_sd' in sr_data: st.session_state[f"sr_umbilical_sd_{v}"] = sr_data['umbilical_sd']
+        if 'umbilical_ri' in sr_data: st.session_state[f"sr_umbilical_ri_{v}"] = sr_data['umbilical_ri']
+        
+        if 'uterine_sd' in sr_data: st.session_state[f"sr_uterine_sd_{v}"] = sr_data['uterine_sd']
+        if 'uterine_ri' in sr_data: st.session_state[f"sr_uterine_ri_{v}"] = sr_data['uterine_ri']
+        
+        if 'uterine_left_pi' in sr_data: st.session_state[f"sr_uterine_left_pi_{v}"] = sr_data['uterine_left_pi']
+        if 'uterine_left_sd' in sr_data: st.session_state[f"sr_uterine_left_sd_{v}"] = sr_data['uterine_left_sd']
+        if 'uterine_left_ri' in sr_data: st.session_state[f"sr_uterine_left_ri_{v}"] = sr_data['uterine_left_ri']
 
+        if 'uterine_right_pi' in sr_data: st.session_state[f"sr_uterine_right_pi_{v}"] = sr_data['uterine_right_pi']
+        if 'uterine_right_sd' in sr_data: st.session_state[f"sr_uterine_right_sd_{v}"] = sr_data['uterine_right_sd']
+        if 'uterine_right_ri' in sr_data: st.session_state[f"sr_uterine_right_ri_{v}"] = sr_data['uterine_right_ri']
+
+        if 'mca_pi' in sr_data: st.session_state[f"sr_mca_pi_{v}"] = sr_data['mca_pi']
+        if 'mca_sd' in sr_data: st.session_state[f"sr_mca_sd_{v}"] = sr_data['mca_sd']
+        if 'mca_ri' in sr_data: st.session_state[f"sr_mca_ri_{v}"] = sr_data['mca_ri']
+        # -----------------------------------------------
+
+        st.session_state["last_applied_version"] = v
     # --------------------------
     lmp_not_sure = st.checkbox("LMP Not Sure / Not Known")
     if lmp_not_sure:
@@ -1450,6 +1474,26 @@ with col1:
                 data["umbilical_pi"] = b1.text_input("Umbilical PI", value=st.session_state.get(f"sr_umbilical_pi_{v}", ""), key=f"sr_umbilical_pi_{v}")
                 data["uterine_pi"] = b2.text_input("Mean Uterine PI", value=mean_ut_pi, key=f"sr_uterine_pi_mean_{v}")
                 data["mca_pi"] = "" # Ensure it stays blank if not present
+
+            # --- NEW: Push S/D and RI to the final data dict for Word Doc ---
+            data["umbilical_sd"] = st.session_state.get(f"sr_umbilical_sd_{v}", "")
+            data["umbilical_ri"] = st.session_state.get(f"sr_umbilical_ri_{v}", "")
+            
+            # These are for the separate Left/Right Uterine rows in the Color Doppler
+            data["uterine_left_pi"] = st.session_state.get(f"sr_uterine_left_pi_{v}", "")
+            data["uterine_left_sd"] = st.session_state.get(f"sr_uterine_left_sd_{v}", "")
+            data["uterine_left_ri"] = st.session_state.get(f"sr_uterine_left_ri_{v}", "")
+            
+            data["uterine_right_pi"] = st.session_state.get(f"sr_uterine_right_pi_{v}", "")
+            data["uterine_right_sd"] = st.session_state.get(f"sr_uterine_right_sd_{v}", "")
+            data["uterine_right_ri"] = st.session_state.get(f"sr_uterine_right_ri_{v}", "")
+            
+            # Fallback for Single Uterine Artery (if machine didn't specify Laterality)
+            data["uterine_sd"] = st.session_state.get(f"sr_uterine_sd_{v}", "")
+            data["uterine_ri"] = st.session_state.get(f"sr_uterine_ri_{v}", "")
+            
+            data["mca_sd"] = st.session_state.get(f"sr_mca_sd_{v}", "")
+            data["mca_ri"] = st.session_state.get(f"sr_mca_ri_{v}", "")
             
             data["uterine_notching"] = st.selectbox("Uterine Artery Notching", ["No notching", "Unilateral Notching", "Bilateral Notching"])
 
