@@ -2,6 +2,7 @@ import streamlit as st
 import io
 import html
 import math
+import re
 from datetime import datetime
 
 from docx import Document
@@ -615,15 +616,16 @@ def build_docx_bytes(data, template_id):
         # (Removed doc.add_paragraph() here to make them flush)
 
         # --- DYNAMIC RATIO TABLE BASED ON GESTATIONAL AGE ---
-        # Try to determine GA from the mean_age string (e.g., "33weeks 4days ± 2w")
-        mean_age_str = data.get('mean_age', '')
-        ga_weeks = 0
-        if "weeks" in mean_age_str:
-            try:
-                # Extract the number before "weeks"
-                ga_weeks = int(mean_age_str.split("weeks")[0].strip())
-            except:
-                ga_weeks = 0
+        import re
+        mean_age_str = str(data.get('mean_age', '')).lower()
+        
+        # Find the digits immediately before "weeks"
+        match = re.search(r'(\d+)\s*weeks', mean_age_str)
+        
+        if match:
+            ga_weeks = int(match.group(1))
+        else:
+            ga_weeks = 0
         
         ratio_table = doc.add_table(rows=1, cols=2)
         ratio_table.alignment = WD_TABLE_ALIGNMENT.LEFT
@@ -963,15 +965,19 @@ def render_ob_preview(data, template_id):
             lines.append(f"  {param.upper():<4}: {(str(size) + 'mm') if size else '':<10} {(str(wks) + 'weeks') if wks else '':<12} {(str(dys) + 'days±2w') if dys else ''}")
         lines.append("")
         # --- DYNAMIC RATIO PREVIEW BASED ON GESTATIONAL AGE ---
-        _mean_age_str = data.get('mean_age', '')
-        _ga_weeks = 0
-        if "weeks" in _mean_age_str:
-            try:
-                _ga_weeks = int(_mean_age_str.split("weeks")[0].strip())
-            except:
-                _ga_weeks = 0
-                
-        if _ga_weeks <= 22 and _ga_weeks > 0:
+        import re
+        _mean_age_str = str(data.get('mean_age', '')).lower()
+        
+        # Find the digits immediately before "weeks"
+        _match = re.search(r'(\d+)\s*weeks', _mean_age_str)
+        
+        if _match:
+            _ga_weeks = int(_match.group(1))
+        else:
+            _ga_weeks = 0
+            
+        # If GA is 22 or less, use FL/HC & HC/AC. Otherwise (or if unknown), use FL/AC & FL/BPD
+        if 0 < _ga_weeks <= 22:
             lines.append(f"FL/HC= {data.get('fl_hc', '')}        HC/AC = {data.get('hc_ac', '')} (BOTH WNL)")
         else:
             lines.append(f"FL/AC= {data.get('fl_ac', '')}        FL/BPD = {data.get('fl_bpd', '')} (BOTH WNL)")
