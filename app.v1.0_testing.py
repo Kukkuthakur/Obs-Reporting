@@ -1266,6 +1266,7 @@ with col1:
     import os
     
     st.markdown("### 🔗 DICOM Input")
+    
     # Initialize the version bumper
     if "dicom_version" not in st.session_state:
         st.session_state["dicom_version"] = 0
