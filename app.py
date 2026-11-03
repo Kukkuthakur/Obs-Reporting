@@ -1240,10 +1240,9 @@ with col1:
             for p in ["bpd", "hc", "ac", "fl", "hl"]:
                 pct_box_val = st.session_state.get(f"sr_{p}_pct_edit_{v}", "")
                 
-                # If LMP is "Not Sure", we override the percentiles to be blank!
+                # If LMP is "Not Sure", we send empty data to the document/preview
                 if lmp_not_sure:
                     data[f"{p}_pct"] = ""
-                    st.session_state[f"sr_{p}_pct_edit_{v}"] = ""
                 elif pct_box_val:
                     data[f"{p}_pct"] = pct_box_val
 
@@ -1264,10 +1263,9 @@ with col1:
             efw_pct_val = b2.text_input("EFW Percentile (%)", value=st.session_state.get(f"sr_fetal_weight_pct_{v}", ""), key=f"sr_fetal_weight_pct_edit_{v}")
             
             if lmp_not_sure:
-                efw_pct_val = ""
-                st.session_state[f"sr_fetal_weight_pct_edit_{v}"] = ""
-                
-            data["fetal_weight_pct"] = efw_pct_val
+                data["fetal_weight_pct"] = ""
+            else:
+                data["fetal_weight_pct"] = efw_pct_val
             if efw_pct_val:
                 bar_efw = generate_percentile_bar(efw_pct_val)
                 if bar_efw: b2.image(bar_efw, use_container_width=True)
