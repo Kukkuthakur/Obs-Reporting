@@ -1263,7 +1263,8 @@ with col1:
     import os
     
     st.markdown("### 🔗 DICOM Input")
-    
+    if "sr_data" in st.session_state:
+    st.write("DEBUG: Parsed SR Data:", st.session_state["sr_data"])
     # Initialize the version bumper
     if "dicom_version" not in st.session_state:
         st.session_state["dicom_version"] = 0
