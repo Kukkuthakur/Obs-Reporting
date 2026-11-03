@@ -193,7 +193,8 @@ def extract_sr_data(ds):
             if vessel:
                 val_str = str(round(num_val, 2))
                 
-                if "pulsatility" in concept_lower or concept_lower == "pi":
+                # PI (Pulsatility)
+                if "pulsatility" in concept_lower or " pi" in concept_lower or concept_lower == "pi":
                     if vessel == "uterine":
                         if 'uterine_pi' in extracted:
                             extracted['uterine_pi_right'] = val_str
@@ -202,7 +203,8 @@ def extract_sr_data(ds):
                     else:
                         extracted[f'{vessel}_pi'] = val_str
                         
-                elif "resistivity" in concept_lower or concept_lower == "ri":
+                # RI (Resistivity)
+                elif "resistivity" in concept_lower or " ri" in concept_lower or concept_lower == "ri":
                     if vessel == "uterine":
                         if 'uterine_ri' in extracted:
                             extracted['uterine_right_ri'] = val_str
@@ -211,7 +213,8 @@ def extract_sr_data(ds):
                     else:
                         extracted[f'{vessel}_ri'] = val_str
                         
-                elif "systolic to diastolic" in concept_lower or "s/d" in concept_lower:
+                # S/D (Systolic / Diastolic)
+                elif "diastolic" in concept_lower or "s/d" in concept_lower or "systolic" in concept_lower:
                     if vessel == "uterine":
                         if 'uterine_sd' in extracted:
                             extracted['uterine_right_sd'] = val_str
