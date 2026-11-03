@@ -614,13 +614,33 @@ def build_docx_bytes(data, template_id):
                         
         # (Removed doc.add_paragraph() here to make them flush)
 
+        # --- DYNAMIC RATIO TABLE BASED ON GESTATIONAL AGE ---
+        # Try to determine GA from the mean_age string (e.g., "33weeks 4days ± 2w")
+        mean_age_str = data.get('mean_age', '')
+        ga_weeks = 0
+        if "weeks" in mean_age_str:
+            try:
+                # Extract the number before "weeks"
+                ga_weeks = int(mean_age_str.split("weeks")[0].strip())
+            except:
+                ga_weeks = 0
+        
         ratio_table = doc.add_table(rows=1, cols=2)
         ratio_table.alignment = WD_TABLE_ALIGNMENT.LEFT
         ratio_table.columns[0].width = Cm(7.5); ratio_table.columns[1].width = Cm(8.5)
-        add_run(ratio_table.cell(0, 0).paragraphs[0], "FL/HC= ", bold=True)
-        add_run(ratio_table.cell(0, 0).paragraphs[0], f"{data.get('fl_hc', '')}", italic=True)
-        add_run(ratio_table.cell(0, 1).paragraphs[0], "HC/AC = ", bold=True)
-        add_run(ratio_table.cell(0, 1).paragraphs[0], f"{data.get('hc_ac', '')} (BOTH WNL)", italic=True)
+        
+        if ga_weeks <= 22 and ga_weeks > 0:
+            # Before 22 weeks
+            add_run(ratio_table.cell(0, 0).paragraphs[0], "FL/HC= ", bold=True)
+            add_run(ratio_table.cell(0, 0).paragraphs[0], f"{data.get('fl_hc', '')}", italic=True)
+            add_run(ratio_table.cell(0, 1).paragraphs[0], "HC/AC = ", bold=True)
+            add_run(ratio_table.cell(0, 1).paragraphs[0], f"{data.get('hc_ac', '')} (BOTH WNL)", italic=True)
+        else:
+            # 23 weeks and beyond
+            add_run(ratio_table.cell(0, 0).paragraphs[0], "FL/AC= ", bold=True)
+            add_run(ratio_table.cell(0, 0).paragraphs[0], f"{data.get('fl_ac', '')}", italic=True)
+            add_run(ratio_table.cell(0, 1).paragraphs[0], "FL/BPD = ", bold=True)
+            add_run(ratio_table.cell(0, 1).paragraphs[0], f"{data.get('fl_bpd', '')} (BOTH WNL)", italic=True)
         
         # (Removed doc.add_paragraph() here to make them flush)
 
@@ -942,7 +962,19 @@ def render_ob_preview(data, template_id):
             size = data.get(f"{param}_size", ""); wks = data.get(f"{param}_wks", ""); dys = data.get(f"{param}_dys", "")
             lines.append(f"  {param.upper():<4}: {(str(size) + 'mm') if size else '':<10} {(str(wks) + 'weeks') if wks else '':<12} {(str(dys) + 'days±2w') if dys else ''}")
         lines.append("")
-        lines.append(f"FL/HC= {data.get('fl_hc', '')}        HC/AC = {data.get('hc_ac', '')} (BOTH WNL)")
+        # --- DYNAMIC RATIO PREVIEW BASED ON GESTATIONAL AGE ---
+        _mean_age_str = data.get('mean_age', '')
+        _ga_weeks = 0
+        if "weeks" in _mean_age_str:
+            try:
+                _ga_weeks = int(_mean_age_str.split("weeks")[0].strip())
+            except:
+                _ga_weeks = 0
+                
+        if _ga_weeks <= 22 and _ga_weeks > 0:
+            lines.append(f"FL/HC= {data.get('fl_hc', '')}        HC/AC = {data.get('hc_ac', '')} (BOTH WNL)")
+        else:
+            lines.append(f"FL/AC= {data.get('fl_ac', '')}        FL/BPD = {data.get('fl_bpd', '')} (BOTH WNL)")
         lines.append("")
         lines.append(f"MEAN AGE : {data.get('mean_age', '')}")
         
