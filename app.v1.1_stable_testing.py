@@ -518,7 +518,7 @@ def build_docx_bytes(data, template_id):
         
         # 1. Header Row
         headers = ["Fetal growth parameters", "mm", "Weeks", "Days", "Percentile"]
-        widths = [Cm(4.5), Cm(1.5), Cm(1.5), Cm(1.5), Cm(5.5)] # Condensed widths
+        widths = [Cm(4.5), Cm(1.5), Cm(1.5), Cm(1.5), Cm(5.0)] # Condensed widths
         for i, text in enumerate(headers):
             cell = bio_table.cell(0, i)
             cell.width = widths[i]
@@ -579,13 +579,16 @@ def build_docx_bytes(data, template_id):
                     bar_img = None
                 if bar_img:
                     p = cell4.paragraphs[0]
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(0)
+                    p.paragraph_format.line_spacing = 1.0
                     
-                    # Add the percentage text FIRST, then the image
-                    add_run(p, f"{pct_val}%  ", bold=True, size=9)
+                    # 1. Add the percentage text
+                    add_run(p, f"{pct_val}% ", bold=True, size=9)
                     
-                    # Add the image
+                    # 2. Add the image (Reduced to 2.5cm to fit perfectly)
                     run = p.add_run()
-                    run.add_picture(bar_img, width=Cm(3.5))
+                    run.add_picture(bar_img, width=Cm(2.5))
         # --- END BIOMETRY TABLE ---
                         
         # (Removed doc.add_paragraph() here to make them flush)
