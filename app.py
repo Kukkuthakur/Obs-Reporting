@@ -288,7 +288,25 @@ def add_run(paragraph, text, bold=False, italic=False, size=11, underline=False,
         run.font.color.rgb = color
     return run
 
-def generate_afi_text(afi_val, is_total=True):
+def set_cell_background(cell, hex_color):
+    """Sets the background shading of a table cell."""
+    tcPr = cell._tc.get_or_add_tcPr()
+    shd = OxmlElement('w:shd')
+    shd.set(qn('w:val'), 'clear')
+    shd.set(qn('w:color'), 'auto')
+    shd.set(qn('w:fill'), hex_color)
+    tcPr.append(shd)
+
+def get_gradient_color(row_index, total_rows=6):
+    """Returns a light green alternating gradient hex code."""
+    # Base light green is E8F5E9. Darker is C8E6C9.
+    # We alternate to keep it readable like the reference image.
+    if row_index == 0:
+        return "A5D6A7" # Header: Darker Green
+    elif row_index % 2 == 1:
+        return "E8F5E9" # Row 1: Lighter
+    else:
+        return "D3EAD5" # Row 2: Slightly darkerdef generate_afi_text(afi_val, is_total=True):
     try:
         val = float(afi_val)
     except (ValueError, TypeError):
@@ -336,6 +354,19 @@ def build_docx_bytes(data, template_id):
     style.paragraph_format.space_after = Pt(0)
     style.paragraph_format.space_before = Pt(0)
 
+    # === FLEXIBLE TOP SPACER ===
+    # Adds exactly 2 blank lines (11pt) above the patient demographics box
+    # to leave room for pre-printed stationery/letterhead.
+    for _ in range(2):
+        _p = doc.add_paragraph()
+        _p.paragraph_format.space_after = Pt(0)
+        _p.paragraph_format.space_before = Pt(0)
+        _p.paragraph_format.line_spacing = 1.0
+        _run = _p.add_run("")
+        _run.font.name = "Calibri"
+        _run.font.size = Pt(11)
+    # === END SPACER ===
+
     # 1. HEADER TABLE
     demo_table = doc.add_table(rows=2, cols=2)
     demo_table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -347,18 +378,33 @@ def build_docx_bytes(data, template_id):
     add_run(demo_table.cell(0, 1).paragraphs[0], f"DATE :- {data.get('report_date', '')}", bold=True)
     add_run(demo_table.cell(1, 0).paragraphs[0], f"AGE/SEX :- {data.get('patient_age', '')}Y/ {data.get('p_sex', 'F')}", bold=True)
     add_run(demo_table.cell(1, 1).paragraphs[0], f"REF. BY:- {data.get('referred_by', '')}", bold=True)
-    doc.add_paragraph().paragraph_format.space_after = Pt(10)
+    
+    # 8pt gap
+    p_gap1 = doc.add_paragraph()
+    p_gap1.paragraph_format.space_after = Pt(0)
+    p_gap1.paragraph_format.line_spacing = Pt(8)
 
     # 2. TITLE
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     add_run(title_p, "ULTRASOUND OBSTETRICS REPORT", bold=True, underline=True, size=14, color=RGBColor(0x1F, 0x4E, 0x79))
+    
+    # 5pt gap
+    p_gap2 = doc.add_paragraph()
+    p_gap2.paragraph_format.space_after = Pt(0)
+    p_gap2.paragraph_format.line_spacing = Pt(5)
+    
     lmp_p = doc.add_paragraph()
+    lmp_p.paragraph_format.space_after = Pt(0)
     if data.get('lmp') == "Not Sure":
         add_run(lmp_p, f"LMP- {data.get('lmp', '')}", bold=False, italic=True)
     else:
         add_run(lmp_p, f"LMP- {data.get('lmp', '')}", bold=True)
-    doc.add_paragraph()
+        
+    # 5pt gap
+    p_gap3 = doc.add_paragraph()
+    p_gap3.paragraph_format.space_after = Pt(0)
+    p_gap3.paragraph_format.line_spacing = Pt(5)
 
     # 3. EARLY OBS
     if template_id == "EARLY_OBS":
@@ -455,43 +501,97 @@ def build_docx_bytes(data, template_id):
         add_run(p, f"Uterus shows single live fetus. Fetus is in ")
         add_run(p, f"{pres_text}", bold=True, italic=True)
         add_run(p, f" at the time of scanning. Fetal movements are present. Fetal cardiac pulsations are appreciated.")
-        doc.add_paragraph()
+        
+        # 8pt gap
+        p_gap4 = doc.add_paragraph()
+        p_gap4.paragraph_format.space_after = Pt(0)
+        p_gap4.paragraph_format.line_spacing = Pt(8)
 
         bio_head = doc.add_paragraph()
         add_run(bio_head, "BIO PHYSICAL PARAMETERS:", bold=True, underline=True)
         bio_head.paragraph_format.space_after = Pt(6)
 
-        bio_table = doc.add_table(rows=5, cols=5)
+        # --- NEW COMPACT COLORED BIOMETRY TABLE ---
+        bio_table = doc.add_table(rows=6, cols=5)
         set_table_borders(bio_table)
-        for row in bio_table.rows:
-            row.cells[0].width = Cm(3.5); row.cells[1].width = Cm(2.5); row.cells[2].width = Cm(2.5); row.cells[3].width = Cm(2.5); row.cells[4].width = Cm(5.0)
+        bio_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        
+        # 1. Header Row
+        headers = ["Fetal growth parameters", "mm", "Weeks", "Days", "Percentile"]
+        widths = [Cm(4.5), Cm(1.5), Cm(1.5), Cm(1.5), Cm(5.0)] # Condensed widths
+        for i, text in enumerate(headers):
+            cell = bio_table.cell(0, i)
+            cell.width = widths[i]
+            set_cell_background(cell, get_gradient_color(0))
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i > 0 else WD_ALIGN_PARAGRAPH.LEFT
+            add_run(p, text, bold=True, size=10)
+
+        # 2. Data Rows
         params = ["bpd", "hc", "ac", "fl", "hl"]
-        for i, param in enumerate(params):
+        param_names = ["Biparietal Diameter", "Head circumference", "Abdominal Circumference", "Femoral Length", "Humerus Length"]
+        
+        for row_idx, param in enumerate(params):
+            row_i = row_idx + 1 # Offset by 1 for header
             size = data.get(f"{param}_size", ""); wks = data.get(f"{param}_wks", ""); dys = data.get(f"{param}_dys", "")
-            add_run(bio_table.cell(i, 0).paragraphs[0], param.upper(), bold=True, italic=True, size=10)
-            add_run(bio_table.cell(i, 1).paragraphs[0], f"{size}mm" if size else "", italic=True, size=10)
-            add_run(bio_table.cell(i, 2).paragraphs[0], f"{wks}weeks" if wks else "", italic=True, size=10)
-            add_run(bio_table.cell(i, 3).paragraphs[0], f"{dys}days±2w" if dys else "", italic=True, size=10)
+            
+            # Row background color
+            bg_color = get_gradient_color(row_i)
+            
+            # Col 0: Parameter Name
+            cell0 = bio_table.cell(row_i, 0)
+            cell0.width = widths[0]
+            set_cell_background(cell0, bg_color)
+            add_run(cell0.paragraphs[0], param_names[row_idx], size=10)
+            
+            # Col 1: Size (mm)
+            cell1 = bio_table.cell(row_i, 1)
+            cell1.width = widths[1]
+            set_cell_background(cell1, bg_color)
+            cell1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            add_run(cell1.paragraphs[0], size if size else "", size=10)
+            
+            # Col 2: Weeks
+            cell2 = bio_table.cell(row_i, 2)
+            cell2.width = widths[2]
+            set_cell_background(cell2, bg_color)
+            cell2.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            add_run(cell2.paragraphs[0], wks if wks else "", size=10)
+            
+            # Col 3: Days
+            cell3 = bio_table.cell(row_i, 3)
+            cell3.width = widths[3]
+            set_cell_background(cell3, bg_color)
+            cell3.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            add_run(cell3.paragraphs[0], dys if dys else "", size=10)
+            
+            # Col 4: Percentile Chart (Text next to the bar to save space)
+            cell4 = bio_table.cell(row_i, 4)
+            cell4.width = widths[4]
+            set_cell_background(cell4, bg_color)
+            cell4.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             
             pct_val = data.get(f"{param}_pct", "")
-            # Check if pct_val is actually a number before passing it to the chart
             if pct_val and str(pct_val).strip() != "":
                 try:
                     bar_img = generate_percentile_bar(pct_val)
                 except:
                     bar_img = None
                 if bar_img:
-                    cell = bio_table.cell(i, 4)
-                    p_img = cell.paragraphs[0]
-                    p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    run = p_img.add_run()
-                    run.add_picture(bar_img, width=Cm(3.5))
+                    p = cell4.paragraphs[0]
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(0)
+                    p.paragraph_format.line_spacing = 1.0
                     
-                    p_txt = cell.add_paragraph(f"{pct_val}%")
-                    p_txt.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    if p_txt.runs:
-                        p_txt.runs[0].font.size = Pt(8)
-        doc.add_paragraph()
+                    # 1. Add the percentage text
+                    add_run(p, f"{pct_val}% ", bold=True, size=9)
+                    
+                    # 2. Add the image (Reduced to 2.5cm to fit perfectly)
+                    run = p.add_run()
+                    run.add_picture(bar_img, width=Cm(2.5))
+        # --- END BIOMETRY TABLE ---
+                        
+        # (Removed doc.add_paragraph() here to make them flush)
 
         ratio_table = doc.add_table(rows=1, cols=2)
         ratio_table.alignment = WD_TABLE_ALIGNMENT.LEFT
@@ -500,14 +600,25 @@ def build_docx_bytes(data, template_id):
         add_run(ratio_table.cell(0, 0).paragraphs[0], f"{data.get('fl_hc', '')}", italic=True)
         add_run(ratio_table.cell(0, 1).paragraphs[0], "HC/AC = ", bold=True)
         add_run(ratio_table.cell(0, 1).paragraphs[0], f"{data.get('hc_ac', '')} (BOTH WNL)", italic=True)
-        doc.add_paragraph()
+        
+        # (Removed doc.add_paragraph() here to make them flush)
 
         p = doc.add_paragraph()
         add_run(p, "MEAN AGE : ", bold=True); add_run(p, f"{data.get('mean_age', '')}", italic=True)
         # --- FETAL WEIGHT WITH BAR ---
         p = doc.add_paragraph()
         add_run(p, "FETAL WEIGHT : ", bold=True)
-        add_run(p, f"{data.get('fetal_weight', '')}g", italic=True)
+        
+        # Calculate the ± 15% error margin
+        fw_str = f"{data.get('fetal_weight', '')}g"
+        try:
+            fw_val = float(data.get('fetal_weight', ''))
+            error_margin = int(round(fw_val * 0.15))
+            fw_str = f"{int(fw_val)} GRAMS ± {error_margin}GMS"
+        except:
+            pass # If no weight is entered, just leave it blank
+            
+        add_run(p, fw_str, italic=True)
         if data.get("fetal_weight_pct"):
             p.add_run("  (Percentile: ")
             p.add_run(f"{data.get('fetal_weight_pct')}%)")
@@ -518,19 +629,76 @@ def build_docx_bytes(data, template_id):
         p = doc.add_paragraph()
         add_run(p, "AFI:- ", bold=True)
         afi_method = data.get('afi_method', 'Total 4 Quadrants')
+        
+        # We must define is_abn here so the bolding works!
         if afi_method == "Total 4 Quadrants":
-            afi_val = data.get('afi_total', ''); desc, is_abn = generate_afi_text(afi_val, is_total=True)
-            afi_str = desc if desc == "Nil, Not a single pocket of even one cm seen" else f"{desc}, total of four quadrants measures {afi_val} cm"
+            afi_val = data.get('afi_total', '')
+            desc, is_abn = generate_afi_text(afi_val, is_total=True)
+            if desc == "Nil, Not a single pocket of even one cm seen":
+                afi_str = desc
+            else:
+                afi_str = f"{desc}, total of four quadrants measures {afi_val} cm"
         else:
-            afi_val = data.get('afi_pocket', ''); desc, is_abn = generate_afi_text(afi_val, is_total=False)
-            afi_str = f"largest pocket measures {afi_val} cm" if not desc else f"{desc}, largest pocket measures {afi_val} cm"
+            afi_val = data.get('afi_pocket', '')
+            try:
+                afi_float = float(afi_val)
+                if 2.0 <= afi_float <= 8.0:
+                    afi_str = f"Adequate, largest pocket measures {afi_val} cm"
+                    is_abn = False
+                elif afi_float < 2.0:
+                    afi_str = f"Reduced, largest pocket measures {afi_val} cm"
+                    is_abn = True
+                else:
+                    afi_str = f"Increased, largest pocket measures {afi_val} cm"
+                    is_abn = True
+            except:
+                afi_str = f"largest pocket measures {afi_val} cm"
+                is_abn = False
+                
         add_run(p, afi_str, bold=is_abn, italic=is_abn)
-
         p = doc.add_paragraph()
         add_run(p, "Foetal heart rate ", bold=True); add_run(p, f"is approx. {data.get('fhr', '')}.", italic=True)
         doc.add_paragraph()
 
-        # ... (Keep your EDD table code here) ...
+        # --- EDD TABLE ---
+        # 1. Safely get the EDDs. If they are empty, use a dash.
+        _lmp_val = data.get('lmp', '')
+        _edd_lmp = data.get('edd_lmp', '')
+        _edd_cua = data.get('edd_cua', '')
+        
+        # 2. Build the table
+        edd_table = doc.add_table(rows=2, cols=3)
+        set_table_borders(edd_table)
+        
+        # 3. Set widths
+        for row in edd_table.rows:
+            row.cells[0].width = Cm(3.5)
+            row.cells[1].width = Cm(5.0)
+            row.cells[2].width = Cm(3.0)
+            
+        edd_data = [
+            ("EDD (LMP)--", _edd_lmp if _lmp_val != "Not Sure" else "-", "±2W"),
+            ("EDD (CUA)--", _edd_cua, "±2W"),
+        ]
+        
+        # 4. Fill the cells with formatting
+        for i, (label, date, err) in enumerate(edd_data):
+            cell_0 = edd_table.cell(i, 0)
+            cell_1 = edd_table.cell(i, 1)
+            cell_2 = edd_table.cell(i, 2)
+            
+            # Clear default paragraph
+            cell_0.text = ""
+            cell_1.text = ""
+            cell_2.text = ""
+            
+            add_run(cell_0.paragraphs[0], label, bold=True, italic=True, size=10)
+            add_run(cell_1.paragraphs[0], str(date), italic=True, size=10)
+            add_run(cell_2.paragraphs[0], err, italic=True, size=10)
+            
+        # 5. Add a gap after the table so it doesn't collide with the Doppler section
+        doc.add_paragraph()
+        # --- END EDD TABLE ---
 
         # --- DOPPLER SECTION WITH TABLE ---
         if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
@@ -687,21 +855,52 @@ def render_ob_preview(data, template_id):
         lines.append(f"MEAN AGE : {data.get('mean_age', '')}")
         
         # FETAL WEIGHT PREVIEW
-        fw_line = f"FETAL WEIGHT : {data.get('fetal_weight', '')}g"
+        fw_str_prev = f"{data.get('fetal_weight', '')}g"
+        try:
+            fw_val_prev = float(data.get('fetal_weight', ''))
+            err_prev = int(round(fw_val_prev * 0.15))
+            fw_str_prev = f"{int(fw_val_prev)} GRAMS ± {err_prev}GMS"
+        except:
+            pass
+            
+        fw_line = f"FETAL WEIGHT : {fw_str_prev}"
         if data.get("fetal_weight_pct"):
             fw_line += f" (Percentile: {data.get('fetal_weight_pct')}%)"
         lines.append(fw_line)
 
         afi_method = data.get('afi_method', 'Total 4 Quadrants')
         if afi_method == "Total 4 Quadrants":
-            afi_val = data.get('afi_total', ''); desc, _ = generate_afi_text(afi_val, is_total=True)
-            afi_str = desc if desc == "Nil, Not a single pocket of even one cm seen" else f"{desc}, total of four quadrants measures {afi_val} cm"
+            afi_val = data.get('afi_total', '')
+            desc, _ = generate_afi_text(afi_val, is_total=True)
+            if desc == "Nil, Not a single pocket of even one cm seen":
+                afi_str = desc
+            else:
+                afi_str = f"{desc}, total of four quadrants measures {afi_val} cm"
         else:
-            afi_val = data.get('afi_pocket', ''); desc, _ = generate_afi_text(afi_val, is_total=False)
-            afi_str = f"largest pocket measures {afi_val} cm" if not desc else f"{desc}, largest pocket measures {afi_val} cm"
+            afi_val = data.get('afi_pocket', '')
+            try:
+                afi_float = float(afi_val)
+                if 2.0 <= afi_float <= 8.0:
+                    afi_str = f"Adequate, largest pocket measures {afi_val} cm"
+                elif afi_float < 2.0:
+                    afi_str = f"Reduced, largest pocket measures {afi_val} cm"
+                else:
+                    afi_str = f"Increased, largest pocket measures {afi_val} cm"
+            except:
+                afi_str = f"largest pocket measures {afi_val} cm"
         lines.append(f"AFI:- {afi_str}")
         lines.append(f"Foetal heart rate is approx. {data.get('fhr', '')}.")
         lines.append("")
+
+        # --- EDD PREVIEW FIX ---
+        _lmp_val = data.get('lmp', '')
+        _edd_lmp = data.get('edd_lmp', '')
+        _edd_cua = data.get('edd_cua', '')
+        
+        lines.append(f"  {'EDD (LMP)--':<18}: {_edd_lmp if _lmp_val != 'Not Sure' else '-'}    ±2W")
+        lines.append(f"  {'EDD (CUA)--':<18}: {_edd_cua}    ±2W")
+        lines.append("")
+        # -----------------------
 
         plac_pos = data.get('placenta_pos', 'ANTERIOR'); plac_os = data.get('placenta_os', 'away from the Os')
         if plac_os == "Placenta Praevia": plac_str = f"is {plac_pos} and Placenta Praevia ({data.get('praevia_grade', 'Grade I')})."
