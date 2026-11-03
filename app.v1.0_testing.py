@@ -1528,21 +1528,7 @@ with col1:
             else:
                 data["mca_sd"] = ""
                 data["mca_ri"] = ""
-            st.markdown("*Doppler Waveform Indices (auto-filled)*")
-            w1, w2, w3, w4 = st.columns(4)
-            data["umbilical_sd"] = w1.text_input("Umb S/D", value=st.session_state.get(f"sr_umbilical_sd_{v}", ""), key=f"sr_umbilical_sd_{v}")
-            data["umbilical_ri"] = w2.text_input("Umb RI", value=st.session_state.get(f"sr_umbilical_ri_{v}", ""), key=f"sr_umbilical_ri_{v}")
-            data["uterine_sd"] = w3.text_input("Ut S/D", value=st.session_state.get(f"sr_uterine_sd_{v}", ""), key=f"sr_uterine_sd_{v}")
-            data["uterine_ri"] = w4.text_input("Ut RI", value=st.session_state.get(f"sr_uterine_ri_{v}", ""), key=f"sr_uterine_ri_{v}")
             
-            # Same for MCA if present
-            if mca_present:
-                data["mca_sd"] = st.text_input("MCA S/D", value=st.session_state.get(f"sr_mca_sd_{v}", ""), key=f"sr_mca_sd_{v}")
-                data["mca_ri"] = st.text_input("MCA RI", value=st.session_state.get(f"sr_mca_ri_{v}", ""), key=f"sr_mca_ri_{v}")
-            else:
-                data["mca_sd"] = ""
-                data["mca_ri"] = ""
-
             # --- NEW CRITICAL FIX: PUSH S/D AND RI DIRECTLY FROM SR_DATA ---
             data["umbilical_sd"] = sr_data.get('umbilical_sd', st.session_state.get(f"sr_umbilical_sd_{v}", ""))
             data["umbilical_ri"] = sr_data.get('umbilical_ri', st.session_state.get(f"sr_umbilical_ri_{v}", ""))
@@ -1561,26 +1547,7 @@ with col1:
             data["mca_sd"] = sr_data.get('mca_sd', st.session_state.get(f"sr_mca_sd_{v}", ""))
             data["mca_ri"] = sr_data.get('mca_ri', st.session_state.get(f"sr_mca_ri_{v}", ""))
             # ---------------------------------------------------------------
-            # --- NEW: Push S/D and RI to the final data dict for Word Doc ---
-            data["umbilical_sd"] = st.session_state.get(f"sr_umbilical_sd_{v}", "")
-            data["umbilical_ri"] = st.session_state.get(f"sr_umbilical_ri_{v}", "")
-            
-            # These are for the separate Left/Right Uterine rows in the Color Doppler
-            data["uterine_left_pi"] = st.session_state.get(f"sr_uterine_left_pi_{v}", "")
-            data["uterine_left_sd"] = st.session_state.get(f"sr_uterine_left_sd_{v}", "")
-            data["uterine_left_ri"] = st.session_state.get(f"sr_uterine_left_ri_{v}", "")
-            
-            data["uterine_right_pi"] = st.session_state.get(f"sr_uterine_right_pi_{v}", "")
-            data["uterine_right_sd"] = st.session_state.get(f"sr_uterine_right_sd_{v}", "")
-            data["uterine_right_ri"] = st.session_state.get(f"sr_uterine_right_ri_{v}", "")
-            
-            # Fallback for Single Uterine Artery (if machine didn't specify Laterality)
-            data["uterine_sd"] = st.session_state.get(f"sr_uterine_sd_{v}", "")
-            data["uterine_ri"] = st.session_state.get(f"sr_uterine_ri_{v}", "")
-            
-            data["mca_sd"] = st.session_state.get(f"sr_mca_sd_{v}", "")
-            data["mca_ri"] = st.session_state.get(f"sr_mca_ri_{v}", "")
-            
+                        
             data["uterine_notching"] = st.selectbox("Uterine Artery Notching", ["No notching", "Unilateral Notching", "Bilateral Notching"])
 
             data["ga_weeks_dop"] = st.number_input("GA (weeks) for Percentiles", min_value=10.0, max_value=42.0, value=28.0, step=0.1)
