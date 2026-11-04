@@ -1239,6 +1239,14 @@ if os.path.exists(json_path):
 v = st.session_state.get("dicom_version", 0)
 sr_data = st.session_state.get("sr_data", {})
 
+# --- THE UNMISSABLE PATIENT BANNER ---
+if sr_data and 'patient_name' in sr_data:
+    _banner_time = datetime.now().strftime("%H:%M:%S")
+    st.success(f"🚨 **LATEST SR RECEIVED FROM MACHINE:** **{sr_data.get('patient_name', 'Unknown')}** (Age: {sr_data.get('patient_age', 'N/A')}) | Time: {_banner_time}")
+else:
+    st.error("⚠️ **NO SR DATA RECEIVED YET.** Please ensure the listener is running and the machine has sent the SR.")
+# -------------------------------------
+
 # --- FIX FOR PLACENTA DROPDOWN CACHING ---
 if "placenta_pos_widget" not in st.session_state:
     st.session_state["placenta_pos_widget"] = "Anterior"
@@ -1283,6 +1291,10 @@ with col1:
     import os
     
     st.markdown("### 🔗 DICOM Input")
+    
+    if sr_data:
+        with st.expander("🔍 DEBUG: View Raw DICOM Data (Verify Patient)"):
+            st.write(sr_data)
     
     # Initialize the version bumper
     if "dicom_version" not in st.session_state:
