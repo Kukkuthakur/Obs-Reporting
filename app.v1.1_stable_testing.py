@@ -4,17 +4,27 @@ import html
 import math
 import re
 from datetime import datetime
+import json
+import os
 
 from docx import Document
-from docx.shared import Pt, Cm, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.oxml.ns import qn
-from docx.oxml import OxmlElement
-import pydicom
-import matplotlib.pyplot as plt
-import numpy as np
+# ... (keep all your other imports here) ...
 
+# --- MOVE LISTENER CHECK TO THE ABSOLUTE TOP ---
+json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'latest_sr.json')
+
+if os.path.exists(json_path):
+    try:
+        mtime = os.path.getmtime(json_path)
+        if st.session_state.get("last_json_mtime") != mtime:
+            with open(json_path, 'r') as f:
+                new_data = json.load(f)
+            st.session_state["sr_data"] = new_data
+            st.session_state["last_json_mtime"] = mtime
+            st.session_state["dicom_version"] = st.session_state.get("dicom_version", 0) + 1
+    except Exception as e:
+        pass
+# -----------------------------------------------
 def generate_percentile_bar(percentile):
     """Generates a color-coded PNG image of a percentile bar."""
     if not percentile:
