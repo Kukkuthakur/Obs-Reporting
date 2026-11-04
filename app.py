@@ -1105,9 +1105,20 @@ def render_ob_preview(data, template_id):
     else:
         pres_text = data.get('presentation', 'variable').lower()
         lie_text = data.get('lie', 'None')
+        
+        lie_map = {
+            "LOA": "Left Occiputo-Anterior",
+            "ROA": "Right Occiputo-Anterior",
+            "LOP": "Left Occiputo-Posterior",
+            "ROP": "Right Occiputo-Posterior"
+        }
+        
         if lie_text != "None":
-            pres_text += f", {lie_text}"
-        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text} presentation of approx. {mean_age} gestation age."
+            pres_text = f"{pres_text.capitalize()} presentation & {lie_map.get(lie_text, lie_text)} lie"
+        else:
+            pres_text = f"{pres_text.capitalize()} presentation"
+            
+        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text} of approx. {mean_age} gestation age."
     lines.append(f"  - {imp_text}")
 
     lines.append("")
