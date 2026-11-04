@@ -734,9 +734,9 @@ def build_docx_bytes(data, template_id):
         
         # 4. Set widths (Reduced to 11cm for legibility)
         for row in edd_table.rows:
-            row.cells[0].width = Cm(3.5)
-            row.cells[1].width = Cm(5.0)
-            row.cells[2].width = Cm(2.5)
+            row.cells[0].width = Cm(2.5)
+            row.cells[1].width = Cm(3.5)
+            row.cells[2].width = Cm(2.0)
             
         # 5. Fill the cells with formatting
         for i, (label, date, err) in enumerate(edd_data):
