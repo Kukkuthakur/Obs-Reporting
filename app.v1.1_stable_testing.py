@@ -730,12 +730,13 @@ def build_docx_bytes(data, template_id):
         # 3. Build the table
         edd_table = doc.add_table(rows=num_rows, cols=3)
         set_table_borders(edd_table)
+        edd_table.alignment = WD_TABLE_ALIGNMENT.LEFT
         
-        # 4. Set widths
+        # 4. Set widths to exactly match Biometry (16.5cm)
         for row in edd_table.rows:
-            row.cells[0].width = Cm(3.5)
-            row.cells[1].width = Cm(5.0)
-            row.cells[2].width = Cm(3.0)
+            row.cells[0].width = Cm(4.0)
+            row.cells[1].width = Cm(8.0)
+            row.cells[2].width = Cm(4.5)
             
         # 5. Fill the cells with formatting
         for i, (label, date, err) in enumerate(edd_data):
@@ -803,14 +804,14 @@ def build_docx_bytes(data, template_id):
             num_cols = 5 if mca_present else 4
             dop_table = doc.add_table(rows=1, cols=num_cols)
             set_table_borders(dop_table)
-            dop_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            dop_table.alignment = WD_TABLE_ALIGNMENT.LEFT
             
             # Set column widths dynamically to match Biometry table total width (16.5cm)
             if mca_present:
-                # 4 + 2 + 3 + 3.5 + 4 = 16.5
+                # 4.0 + 2.0 + 3.0 + 3.5 + 4.0 = 16.5
                 dop_widths = [Cm(4.0), Cm(2.0), Cm(3.0), Cm(3.5), Cm(4.0)]
             else:
-                # 4.5 + 2.5 + 3.5 + 6 = 16.5
+                # 4.5 + 2.5 + 3.5 + 6.0 = 16.5
                 dop_widths = [Cm(4.5), Cm(2.5), Cm(3.5), Cm(6.0)]
             
             # 1. Header Row
