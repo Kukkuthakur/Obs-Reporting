@@ -1245,9 +1245,6 @@ _data_in_memory = st.session_state.get("sr_data", {})
 if _data_in_memory and 'patient_name' in _data_in_memory:
     _banner_time = datetime.now().strftime("%H:%M:%S")
     st.success(f"🚨 **LATEST SR RECEIVED FROM MACHINE:** **{_data_in_memory.get('patient_name', 'Unknown')}** (Age: {_data_in_memory.get('patient_age', 'N/A')}) | Time: {_banner_time}")
-elif p_name:
-    _banner_time = datetime.now().strftime("%H:%M:%S")
-    st.success(f"🚨 **ACTIVE PATIENT ON SCREEN:** **{p_name}** (Age: {p_age}) | Time: {_banner_time}")
 else:
     st.error("⚠️ **NO PATIENT DATA.** Please type a name or send an SR from the machine.")
 # -------------------------------------
