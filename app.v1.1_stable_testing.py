@@ -294,8 +294,15 @@ def add_run(paragraph, text, bold=False, italic=False, size=11, underline=False,
     run.bold = bold
     run.italic = italic
     run.underline = underline
+    
     if color is not None:
         run.font.color.rgb = color
+        # Force the XML to use the color
+        rPr = run._element.get_or_add_rPr()
+        c = OxmlElement('w:color')
+        c.set(qn('w:val'), str(color))
+        rPr.append(c)
+        
     return run
 
 def set_cell_background(cell, hex_color):
@@ -657,7 +664,7 @@ def build_docx_bytes(data, template_id):
         try:
             fw_val = float(data.get('fetal_weight', ''))
             error_margin = int(round(fw_val * 0.15))
-            fw_str = f"{int(fw_val)} GRAMS ± {error_margin}GMS"
+            fw_str = f"{int(fw_val)} grams ± {error_margin}gms"
         except:
             pass # If no weight is entered, just leave it blank
             
@@ -749,6 +756,40 @@ def build_docx_bytes(data, template_id):
         doc.add_paragraph()
         # --- END EDD TABLE ---
 
+        # --- PLACENTA ---
+        p = doc.add_paragraph()
+        add_run(p, "Placenta ", bold=True)
+        plac_pos = data.get('placenta_pos', 'ANTERIOR')
+        plac_os = data.get('placenta_os', 'away from the Os')
+        
+        if plac_os == "Placenta Praevia":
+            plac_str = f"is {plac_pos} and Placenta Praevia ({data.get('praevia_grade', 'Grade I')})."
+        elif plac_os == "Low-lying":
+            dist = data.get('placenta_dist', '')
+            plac_str = f"is {plac_pos} and Low-lying, about {dist}cm away from the Internal Os." if dist.strip() else f"is {plac_pos} and Low-lying, but away from the Internal Os."
+        else:
+            plac_str = f"is {plac_pos} and {plac_os}."
+        add_run(p, plac_str)
+
+        # --- CERVIX ---
+        p = doc.add_paragraph()
+        add_run(p, "CERVIX- ", bold=True)
+        add_run(p, f"normal ({data.get('cervix', '')}), internal Os is {data.get('internal_os', 'closed').lower()}.")
+
+        # --- CORD LOOP ---
+        p = doc.add_paragraph()
+        if data.get('cord_around') or data.get('cord_straddling'):
+            if data.get('cord_around'): add_run(p, "SINGLE LOOP OF CORD AROUND THE NECK.", bold=True)
+            if data.get('cord_straddling'): add_run(p, "SINGLE LOOP OF CORD STRADDLING THE NECK.", bold=True)
+        else:
+            add_run(p, "NO LOOP OF CORD SEEN AROUND THE NECK.", bold=True)
+
+        # --- SCAR THICKNESS (T3 only) ---
+        if template_id == "T3" and data.get('measure_scar'):
+            p = doc.add_paragraph()
+            add_run(p, "Scar Thickness: ", bold=True)
+            add_run(p, f"{data.get('scar_size', '')} mm", italic=True)
+
         # --- DOPPLER SECTION WITH DYNAMIC TABLE ---
         if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
             doc.add_paragraph()
@@ -764,11 +805,13 @@ def build_docx_bytes(data, template_id):
             set_table_borders(dop_table)
             dop_table.alignment = WD_TABLE_ALIGNMENT.CENTER
             
-            # Set column widths dynamically
+            # Set column widths dynamically to match Biometry table total width (16.5cm)
             if mca_present:
-                dop_widths = [Cm(3.5), Cm(2.0), Cm(2.5), Cm(4.5), Cm(4.5)]
+                # 4 + 2 + 3 + 3.5 + 4 = 16.5
+                dop_widths = [Cm(4.0), Cm(2.0), Cm(3.0), Cm(3.5), Cm(4.0)]
             else:
-                dop_widths = [Cm(4.0), Cm(2.0), Cm(3.0), Cm(6.0)]
+                # 4.5 + 2.5 + 3.5 + 6 = 16.5
+                dop_widths = [Cm(4.5), Cm(2.5), Cm(3.5), Cm(6.0)]
             
             # 1. Header Row
             headers = ["Vessel", "PI Value", "Notching", "Percentile"]
@@ -859,7 +902,7 @@ def build_docx_bytes(data, template_id):
     # 5. IMPRESSION
     doc.add_paragraph()
     imp_head = doc.add_paragraph()
-    add_run(imp_head, "IMPRESSION:", bold=True, underline=True)
+    add_run(imp_head, "IMPRESSION:", bold=True, underline=True, color=RGBColor(0x1F, 0x4E, 0x79))
     mean_age = data.get('mean_age', '')
     if template_id == "EARLY_OBS":
         if data.get('cardiac_status') == "Blighted Ovum":
@@ -873,9 +916,20 @@ def build_docx_bytes(data, template_id):
     else:
         pres_text = data.get('presentation', 'variable').lower()
         lie_text = data.get('lie', 'None')
+        
+        lie_map = {
+            "LOA": "Left Occiputo-Anterior",
+            "ROA": "Right Occiputo-Anterior",
+            "LOP": "Left Occiputo-Posterior",
+            "ROP": "Right Occiputo-Posterior"
+        }
+        
         if lie_text != "None":
-            pres_text += f", {lie_text}"
-        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text} presentation of approx. {mean_age} gestation age."
+            pres_text = f"{pres_text.capitalize()} presentation & {lie_map.get(lie_text, lie_text)} lie"
+        else:
+            pres_text = f"{pres_text.capitalize()} presentation"
+            
+        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text} of approx. {mean_age} gestation age."
     p = doc.add_paragraph(); add_run(p, imp_text, bold=True, italic=True)
 
     # 6. PNDT & NOTE COMBINED BOX
@@ -989,7 +1043,7 @@ def render_ob_preview(data, template_id):
         try:
             fw_val_prev = float(data.get('fetal_weight', ''))
             err_prev = int(round(fw_val_prev * 0.15))
-            fw_str_prev = f"{int(fw_val_prev)} GRAMS ± {err_prev}GMS"
+            fw_str_prev = f"{int(fw_val_prev)} grams ± {err_prev}gms"
         except:
             pass
             
@@ -1073,27 +1127,44 @@ def render_ob_preview(data, template_id):
 
     lines.append(""); lines.append("IMPRESSION:")
     mean_age = data.get('mean_age', '')
+    
+    imp_map = {
+        "Blighted": f"INTRA UTERINE EMPTY GESTATIONAL SAC OF {data.get('ga_crl', '')} +/-1w WITH NO APPRECIABLE FETAL POLE OR YOLK SAC - LIKELY EARLY PREGNANCY FAILURE (BLIGHTED OVUM).",
+        "NotYet": f"Intra uterine pregnancy of {data.get('ga_crl', '')} +/-1w with not yet appreciable cardiac activity. Adv- Review scan after 2 weeks.",
+        "Present": f"Intra uterine live pregnancy of {data.get('ga_crl', '')} +/-1w with good cardiac activity.",
+        "NT_NB": f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
+    }
+
     if template_id == "EARLY_OBS":
-        if data.get('cardiac_status') == "Blighted Ovum":
-            imp_text = f"INTRA UTERINE EMPTY GESTATIONAL SAC OF {data.get('ga_crl', '')} +/-1w WITH NO APPRECIABLE FETAL POLE OR YOLK SAC - LIKELY EARLY PREGNANCY FAILURE (BLIGHTED OVUM)."
-        elif data.get('cardiac_status') == "Not yet appreciable":
-            imp_text = f"Intra uterine pregnancy of {data.get('ga_crl', '')} +/-1w with not yet appreciable cardiac activity. Adv- Review scan after 2 weeks."
-        else:
-            imp_text = f"Intra uterine live pregnancy of {data.get('ga_crl', '')} +/-1w with good cardiac activity."
+        status = data.get('cardiac_status')
+        if status == "Blighted Ovum": imp_text = imp_map["Blighted"]
+        elif status == "Not yet appreciable": imp_text = imp_map["NotYet"]
+        else: imp_text = imp_map["Present"]
     elif template_id == "NT_NB":
-        imp_text = f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
+        imp_text = imp_map["NT_NB"]
     else:
         pres_text = data.get('presentation', 'variable').lower()
         lie_text = data.get('lie', 'None')
+        
+        lie_map = {
+            "LOA": "Left Occiputo-Anterior",
+            "ROA": "Right Occiputo-Anterior",
+            "LOP": "Left Occiputo-Posterior",
+            "ROP": "Right Occiputo-Posterior"
+        }
+        
         if lie_text != "None":
-            pres_text += f", {lie_text}"
-        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text} presentation of approx. {mean_age} gestation age."
+            pres_text = f"{pres_text.capitalize()} presentation & {lie_map.get(lie_text, lie_text)} lie"
+        else:
+            pres_text = f"{pres_text.capitalize()} presentation"
+            
+        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text} of approx. {mean_age} gestation age."
+        
     lines.append(f"  - {imp_text}")
 
     lines.append("")
     lines.append("PNDT DISCLAIMER: The radiologist has not conducted or caused to conduct any pre-natal diagnostic technique for the purpose of determining fetal sex.")
     return "\n".join(lines)
-
 # ============================================================
 # STREAMLIT UI
 # ============================================================
@@ -1156,14 +1227,16 @@ if os.path.exists(json_path):
 v = st.session_state.get("dicom_version", 0)
 sr_data = st.session_state.get("sr_data", {})
 
-# FORCE NAME/AGE INTO SESSION STATE IMMEDIATELY
-if 'patient_name' in sr_data: st.session_state[f"sr_patient_name_{v}"] = sr_data['patient_name']
-if 'patient_age' in sr_data: st.session_state[f"sr_patient_age_{v}"] = sr_data['patient_age']
-if 'fetal_weight_pct' in sr_data: st.session_state[f"sr_fetal_weight_pct_edit_{v}"] = sr_data['fetal_weight_pct']
+# --- THE ACTUAL NAME/AUTO-FILL FIX ---
+# We bypass the versioning and force the name/age directly into the widget keys.
+if 'patient_name' in sr_data and sr_data['patient_name']:
+    st.session_state["p_name_input"] = sr_data['patient_name']
+if 'patient_age' in sr_data and sr_data['patient_age']:
+    st.session_state["p_age_input"] = sr_data['patient_age']
 
 c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 2, 3])
-with c1: p_name = st.text_input("Name", value=st.session_state.get(f"sr_patient_name_{v}", ""), key=f"p_name_input_{v}")
-with c2: p_age = st.text_input("Age", value=st.session_state.get(f"sr_patient_age_{v}", ""), key=f"p_age_input_{v}")
+with c1: p_name = st.text_input("Name", key="p_name_input")
+with c2: p_age = st.text_input("Age", key="p_age_input")
 with c3: p_sex = st.radio("Sex", ["F", "M"], horizontal=True)
 with c4: p_date = st.text_input("Date", value=datetime.now().strftime("%d-%b-%y"))
 with c5: p_ref = st.text_input("Referred by")
@@ -1514,9 +1587,20 @@ with col2:
 
     st.subheader("⬇️ Download Report")
     docx_bytes = build_docx_bytes(data, template_id)
+    
+    # Generate a unique filename: PatientName_GA_DateTime
+    import datetime as dt
+    _now = dt.datetime.now().strftime("%d%b%Y_%H%M")
+    
+    # Clean up the name and GA to avoid invalid file characters
+    _clean_name = str(data.get('patient_name', 'Unknown')).replace(" ", "_").replace("/", "_")
+    _clean_ga = str(data.get('mean_age', 'UnknownGA')).replace(" ", "").replace("±", "")
+    
+    _filename = f"OB_{_clean_name}_{_clean_ga}_{_now}.docx"
+
     st.download_button(
         label="Download Word Document",
         data=docx_bytes,
-        file_name=f"OB_Report_{p_name or 'Unknown'}.docx",
+        file_name=_filename,
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
