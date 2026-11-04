@@ -1553,8 +1553,8 @@ with col2:
 
     st.subheader("⬇️ Download Report")
     docx_bytes = build_docx_bytes(data, template_id)
-    st.download_button(
-        # Generate a unique filename: PatientName_GA_DateTime
+    
+    # Generate a unique filename: PatientName_GA_DateTime
     import datetime as dt
     _now = dt.datetime.now().strftime("%d%b%Y_%H%M")
     
