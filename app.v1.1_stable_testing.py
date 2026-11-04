@@ -732,11 +732,11 @@ def build_docx_bytes(data, template_id):
         set_table_borders(edd_table)
         edd_table.alignment = WD_TABLE_ALIGNMENT.LEFT
         
-        # 4. Set widths to exactly match Biometry (16.5cm)
+        # 4. Set widths (Reduced to 11cm for legibility)
         for row in edd_table.rows:
-            row.cells[0].width = Cm(4.0)
-            row.cells[1].width = Cm(8.0)
-            row.cells[2].width = Cm(4.5)
+            row.cells[0].width = Cm(3.5)
+            row.cells[1].width = Cm(5.0)
+            row.cells[2].width = Cm(2.5)
             
         # 5. Fill the cells with formatting
         for i, (label, date, err) in enumerate(edd_data):
@@ -806,13 +806,13 @@ def build_docx_bytes(data, template_id):
             set_table_borders(dop_table)
             dop_table.alignment = WD_TABLE_ALIGNMENT.LEFT
             
-            # Set column widths dynamically to match Biometry table total width (16.5cm)
+            # Set column widths dynamically to match Biometry table (14.0cm total)
             if mca_present:
-                # 4.0 + 2.0 + 3.0 + 3.5 + 4.0 = 16.5
-                dop_widths = [Cm(4.0), Cm(2.0), Cm(3.0), Cm(3.5), Cm(4.0)]
+                # 4.0 + 2.0 + 2.5 + 2.5 + 3.0 = 14.0
+                dop_widths = [Cm(4.0), Cm(2.0), Cm(2.5), Cm(2.5), Cm(3.0)]
             else:
-                # 4.5 + 2.5 + 3.5 + 6.0 = 16.5
-                dop_widths = [Cm(4.5), Cm(2.5), Cm(3.5), Cm(6.0)]
+                # 3.5 + 2.5 + 3.0 + 5.0 = 14.0
+                dop_widths = [Cm(3.5), Cm(2.5), Cm(3.0), Cm(5.0)]
             
             # 1. Header Row
             headers = ["Vessel", "PI Value", "Notching", "Percentile"]
