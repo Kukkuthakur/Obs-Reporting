@@ -880,15 +880,15 @@ def build_docx_bytes(data, template_id):
     elif template_id == "NT_NB":
         imp_text = f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
         else:
-    pres_text = data.get('presentation', 'variable').lower()
-        lie_text = data.get('lie', 'None')
+            pres_text = data.get('presentation', 'variable').lower()
+            lie_text = data.get('lie', 'None')
         
-        lie_map = {
-            "LOA": "Left Occiputo-Anterior",
-            "ROA": "Right Occiputo-Anterior",
-            "LOP": "Left Occiputo-Posterior",
-            "ROP": "Right Occiputo-Posterior"
-        }
+            lie_map = {
+                "LOA": "Left Occiputo-Anterior",
+                "ROA": "Right Occiputo-Anterior",
+                "LOP": "Left Occiputo-Posterior",
+                "ROP": "Right Occiputo-Posterior"
+            }
         
         if lie_text != "None":
             pres_text = f"{pres_text.capitalize()} presentation & {lie_map.get(lie_text, lie_text)} lie"
