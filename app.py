@@ -879,9 +879,9 @@ def build_docx_bytes(data, template_id):
             imp_text = f"Intra uterine live pregnancy of {data.get('ga_crl', '')} +/-1w with good cardiac activity."
     elif template_id == "NT_NB":
         imp_text = f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
-        else:
-            pres_text = data.get('presentation', 'variable').lower()
-            lie_text = data.get('lie', 'None')
+    else:
+        pres_text = data.get('presentation', 'variable').lower()
+        lie_text = data.get('lie', 'None')
         
             lie_map = {
                 "LOA": "Left Occiputo-Anterior",
