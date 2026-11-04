@@ -1560,8 +1560,9 @@ with col1:
                 "Fundal - extending antero-posteriorly",
                 "Low-Lying"
             ]
-            data["placenta_pos"] = b1.selectbox("Placenta Position", _plac_opts)
-            data["placenta_os"] = b2.selectbox("Placenta Relation to Os", ["away from the Os", "Low-lying", "Placenta Praevia"])
+            # The key forces Streamlit to refresh the widget
+            data["placenta_pos"] = b1.selectbox("Placenta Position", _plac_opts, key="placenta_pos_widget")
+            data["placenta_os"] = b2.selectbox("Placenta Relation to Os", ["away from the Os", "Low-lying", "Placenta Praevia"], key="placenta_os_widget")
 
     else:
         with st.expander("Anatomy & Presentation", expanded=True):
