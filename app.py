@@ -756,6 +756,40 @@ def build_docx_bytes(data, template_id):
         doc.add_paragraph()
         # --- END EDD TABLE ---
 
+        # --- PLACENTA ---
+        p = doc.add_paragraph()
+        add_run(p, "Placenta ", bold=True)
+        plac_pos = data.get('placenta_pos', 'ANTERIOR')
+        plac_os = data.get('placenta_os', 'away from the Os')
+        
+        if plac_os == "Placenta Praevia":
+            plac_str = f"is {plac_pos} and Placenta Praevia ({data.get('praevia_grade', 'Grade I')})."
+        elif plac_os == "Low-lying":
+            dist = data.get('placenta_dist', '')
+            plac_str = f"is {plac_pos} and Low-lying, about {dist}cm away from the Internal Os." if dist.strip() else f"is {plac_pos} and Low-lying, but away from the Internal Os."
+        else:
+            plac_str = f"is {plac_pos} and {plac_os}."
+        add_run(p, plac_str)
+
+        # --- CERVIX ---
+        p = doc.add_paragraph()
+        add_run(p, "CERVIX- ", bold=True)
+        add_run(p, f"normal ({data.get('cervix', '')}), internal Os is {data.get('internal_os', 'closed').lower()}.")
+
+        # --- CORD LOOP ---
+        p = doc.add_paragraph()
+        if data.get('cord_around') or data.get('cord_straddling'):
+            if data.get('cord_around'): add_run(p, "SINGLE LOOP OF CORD AROUND THE NECK.", bold=True)
+            if data.get('cord_straddling'): add_run(p, "SINGLE LOOP OF CORD STRADDLING THE NECK.", bold=True)
+        else:
+            add_run(p, "NO LOOP OF CORD SEEN AROUND THE NECK.", bold=True)
+
+        # --- SCAR THICKNESS (T3 only) ---
+        if template_id == "T3" and data.get('measure_scar'):
+            p = doc.add_paragraph()
+            add_run(p, "Scar Thickness: ", bold=True)
+            add_run(p, f"{data.get('scar_size', '')} mm", italic=True)
+
         # --- DOPPLER SECTION WITH DYNAMIC TABLE ---
         if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
             doc.add_paragraph()
