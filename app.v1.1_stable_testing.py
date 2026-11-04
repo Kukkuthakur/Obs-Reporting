@@ -1240,13 +1240,14 @@ v = st.session_state.get("dicom_version", 0)
 sr_data = st.session_state.get("sr_data", {})
 
 # --- THE UNMISSABLE PATIENT BANNER ---
-# We check the actual text boxes (p_name, p_age) instead of the raw dictionary
-# to ensure it matches what the typist sees on screen.
-if p_name:
+_data_in_memory = st.session_state.get("sr_data", {})
+
+if _data_in_memory and 'patient_name' in _data_in_memory:
+    _banner_time = datetime.now().strftime("%H:%M:%S")
+    st.success(f"🚨 **LATEST SR RECEIVED FROM MACHINE:** **{_data_in_memory.get('patient_name', 'Unknown')}** (Age: {_data_in_memory.get('patient_age', 'N/A')}) | Time: {_banner_time}")
+elif p_name:
     _banner_time = datetime.now().strftime("%H:%M:%S")
     st.success(f"🚨 **ACTIVE PATIENT ON SCREEN:** **{p_name}** (Age: {p_age}) | Time: {_banner_time}")
-elif sr_data and 'patient_name' in sr_data:
-    st.success(f"🚨 **LATEST SR IN MEMORY:** **{sr_data.get('patient_name', 'Unknown')}** (Age: {sr_data.get('patient_age', 'N/A')})")
 else:
     st.error("⚠️ **NO PATIENT DATA.** Please type a name or send an SR from the machine.")
 # -------------------------------------
@@ -1296,9 +1297,11 @@ with col1:
     
     st.markdown("### 🔗 DICOM Input")
     
-    if sr_data:
+    _debug_data = st.session_state.get("sr_data", {})
+    if _debug_data:
         with st.expander("🔍 DEBUG: View Raw DICOM Data (Verify Patient)"):
-            st.write(sr_data)
+            # st.json formats it beautifully and fixes the black-on-black text issue
+            st.json(_debug_data)
     
     # Initialize the version bumper
     if "dicom_version" not in st.session_state:
