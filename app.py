@@ -1093,6 +1093,7 @@ def render_ob_preview(data, template_id):
 
     lines.append(""); lines.append("IMPRESSION:")
     mean_age = data.get('mean_age', '')
+    
     if template_id == "EARLY_OBS":
         if data.get('cardiac_status') == "Blighted Ovum":
             imp_text = f"INTRA UTERINE EMPTY GESTATIONAL SAC OF {data.get('ga_crl', '')} +/-1w WITH NO APPRECIABLE FETAL POLE OR YOLK SAC - LIKELY EARLY PREGNANCY FAILURE (BLIGHTED OVUM)."
@@ -1100,8 +1101,10 @@ def render_ob_preview(data, template_id):
             imp_text = f"Intra uterine pregnancy of {data.get('ga_crl', '')} +/-1w with not yet appreciable cardiac activity. Adv- Review scan after 2 weeks."
         else:
             imp_text = f"Intra uterine live pregnancy of {data.get('ga_crl', '')} +/-1w with good cardiac activity."
+            
     elif template_id == "NT_NB":
         imp_text = f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
+        
     else:
         pres_text = data.get('presentation', 'variable').lower()
         lie_text = data.get('lie', 'None')
@@ -1119,6 +1122,7 @@ def render_ob_preview(data, template_id):
             pres_text = f"{pres_text.capitalize()} presentation"
             
         imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text} of approx. {mean_age} gestation age."
+        
     lines.append(f"  - {imp_text}")
 
     lines.append("")
