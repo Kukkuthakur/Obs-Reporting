@@ -760,16 +760,20 @@ def build_docx_bytes(data, template_id):
         # --- PLACENTA ---
         p = doc.add_paragraph()
         add_run(p, "Placenta ", bold=True)
-        plac_pos = data.get('placenta_pos', 'ANTERIOR')
+        plac_pos = data.get('placenta_pos', 'Anterior')
         plac_os = data.get('placenta_os', 'away from the Os')
         
+        # Add the bold italic position
+        add_run(p, "is ", italic=False)
+        add_run(p, plac_pos.lower(), bold=True, italic=True)
+        
         if plac_os == "Placenta Praevia":
-            plac_str = f"is {plac_pos} and Placenta Praevia ({data.get('praevia_grade', 'Grade I')})."
+            plac_str = f" and Placenta Praevia ({data.get('praevia_grade', 'Grade I')})."
         elif plac_os == "Low-lying":
             dist = data.get('placenta_dist', '')
-            plac_str = f"is {plac_pos} and Low-lying, about {dist}cm away from the Internal Os." if dist.strip() else f"is {plac_pos} and Low-lying, but away from the Internal Os."
+            plac_str = f" and Low-lying, about {dist}cm away from the Internal Os." if dist.strip() else f" and Low-lying, but away from the Internal Os."
         else:
-            plac_str = f"is {plac_pos} and {plac_os}."
+            plac_str = f" and {plac_os}."
         add_run(p, plac_str)
 
         # --- CERVIX ---
@@ -1088,12 +1092,18 @@ def render_ob_preview(data, template_id):
         lines.append(f"  {'EDD (CUA)--':<18}: {_edd_cua}    ±2W")
         lines.append("")
         # -----------------------
-        plac_pos = data.get('placenta_pos', 'ANTERIOR'); plac_os = data.get('placenta_os', 'away from the Os')
-        if plac_os == "Placenta Praevia": plac_str = f"is {plac_pos} and Placenta Praevia ({data.get('praevia_grade', 'Grade I')})."
+        plac_pos = data.get('placenta_pos', 'Anterior'); plac_os = data.get('placenta_os', 'away from the Os')
+        
+        # Build the base position string
+        _pos_str = plac_pos.lower()
+        
+        if plac_os == "Placenta Praevia": 
+            plac_str = f"is {_pos_str} and Placenta Praevia ({data.get('praevia_grade', 'Grade I')})."
         elif plac_os == "Low-lying":
             dist = data.get('placenta_dist', '')
-            plac_str = f"is {plac_pos} and Low-lying, about {dist}cm away from the Internal Os." if dist.strip() else f"is {plac_pos} and Low-lying, but away from the Internal Os."
-        else: plac_str = f"is {plac_pos} and {plac_os}."
+            plac_str = f"is {_pos_str} and Low-lying, about {dist}cm away from the Internal Os." if dist.strip() else f"is {_pos_str} and Low-lying, but away from the Internal Os."
+        else: 
+            plac_str = f"is {_pos_str} and {plac_os}."
         lines.append(f"Placenta {plac_str}")
 
         lines.append(f"CERVIX- normal ({data.get('cervix', '')}), internal Os is {data.get('internal_os', 'closed').lower()}.")
@@ -1542,8 +1552,16 @@ with col1:
             data["dv_awave"] = st.selectbox("DV A-Wave", ["Positive", "Absent", "Reversed"])
             
             b1, b2 = st.columns(2)
-            data["placenta_pos"] = b1.selectbox("Placenta Position", ["ANTERIOR", "POSTERIOR", "FUNDAL", "LOW-LYING"])
-            data["cervix"] = b2.text_input("Cervix Length", value="")
+            _plac_opts = [
+                "Anterior", 
+                "Posterior", 
+                "Fundo-Anterior", 
+                "Fundo-Posterior", 
+                "Fundal - extending antero-posteriorly",
+                "Low-Lying"
+            ]
+            data["placenta_pos"] = b1.selectbox("Placenta Position", _plac_opts)
+            data["placenta_os"] = b2.selectbox("Placenta Relation to Os", ["away from the Os", "Low-lying", "Placenta Praevia"])
 
     else:
         with st.expander("Anatomy & Presentation", expanded=True):
