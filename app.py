@@ -664,7 +664,7 @@ def build_docx_bytes(data, template_id):
         try:
             fw_val = float(data.get('fetal_weight', ''))
             error_margin = int(round(fw_val * 0.15))
-            fw_str = f"{int(fw_val)} GRAMS ± {error_margin}GMS"
+            fw_str = f"{int(fw_val)} grams ± {error_margin}gms"
         except:
             pass # If no weight is entered, just leave it blank
             
@@ -771,11 +771,13 @@ def build_docx_bytes(data, template_id):
             set_table_borders(dop_table)
             dop_table.alignment = WD_TABLE_ALIGNMENT.CENTER
             
-            # Set column widths dynamically
+            # Set column widths dynamically to match Biometry table total width (16.5cm)
             if mca_present:
-                dop_widths = [Cm(3.5), Cm(2.0), Cm(2.5), Cm(4.5), Cm(4.5)]
+                # 4 + 2 + 3 + 3.5 + 4 = 16.5
+                dop_widths = [Cm(4.0), Cm(2.0), Cm(3.0), Cm(3.5), Cm(4.0)]
             else:
-                dop_widths = [Cm(4.0), Cm(2.0), Cm(3.0), Cm(6.0)]
+                # 4.5 + 2.5 + 3.5 + 6 = 16.5
+                dop_widths = [Cm(4.5), Cm(2.5), Cm(3.5), Cm(6.0)]
             
             # 1. Header Row
             headers = ["Vessel", "PI Value", "Notching", "Percentile"]
@@ -877,12 +879,23 @@ def build_docx_bytes(data, template_id):
             imp_text = f"Intra uterine live pregnancy of {data.get('ga_crl', '')} +/-1w with good cardiac activity."
     elif template_id == "NT_NB":
         imp_text = f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
-    else:
-        pres_text = data.get('presentation', 'variable').lower()
+        else:
+    pres_text = data.get('presentation', 'variable').lower()
         lie_text = data.get('lie', 'None')
+        
+        lie_map = {
+            "LOA": "Left Occiputo-Anterior",
+            "ROA": "Right Occiputo-Anterior",
+            "LOP": "Left Occiputo-Posterior",
+            "ROP": "Right Occiputo-Posterior"
+        }
+        
         if lie_text != "None":
-            pres_text += f", {lie_text}"
-        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text} presentation of approx. {mean_age} gestation age."
+            pres_text = f"{pres_text.capitalize()} presentation & {lie_map.get(lie_text, lie_text)} lie"
+        else:
+            pres_text = f"{pres_text.capitalize()} presentation"
+            
+        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text} of approx. {mean_age} gestation age."
     p = doc.add_paragraph(); add_run(p, imp_text, bold=True, italic=True)
 
     # 6. PNDT & NOTE COMBINED BOX
