@@ -381,7 +381,8 @@ def build_docx_bytes(data, template_id):
         _p.paragraph_format.space_after = Pt(0)
         _p.paragraph_format.space_before = Pt(0)
         _p.paragraph_format.line_spacing = 1.0
-        _run = _p.add_run("")
+        # Adding a zero-width space so Word doesn't merge the empty paragraphs
+        _run = _p.add_run("\u200B") 
         _run.font.name = "Calibri"
         _run.font.size = Pt(10)
         
@@ -391,7 +392,7 @@ def build_docx_bytes(data, template_id):
         _p.paragraph_format.space_after = Pt(0)
         _p.paragraph_format.space_before = Pt(0)
         _p.paragraph_format.line_spacing = 1.0
-        _run = _p.add_run("")
+        _run = _p.add_run("\u200B")
         _run.font.name = "Calibri"
         _run.font.size = Pt(5)
         
@@ -1238,6 +1239,12 @@ if os.path.exists(json_path):
 
 v = st.session_state.get("dicom_version", 0)
 sr_data = st.session_state.get("sr_data", {})
+
+# --- FIX FOR PLACENTA DROPDOWN CACHING ---
+if "placenta_pos_widget" not in st.session_state:
+    st.session_state["placenta_pos_widget"] = "Anterior"
+if "placenta_os_widget" not in st.session_state:
+    st.session_state["placenta_os_widget"] = "away from the Os"
 
 # --- THE ACTUAL NAME/AUTO-FILL FIX ---
 # We bypass the versioning and force the name/age directly into the widget keys.
