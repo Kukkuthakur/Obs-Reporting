@@ -1009,7 +1009,7 @@ def render_ob_preview(data, template_id):
         try:
             fw_val_prev = float(data.get('fetal_weight', ''))
             err_prev = int(round(fw_val_prev * 0.15))
-            fw_str_prev = f"{int(fw_val_prev)} GRAMS ± {err_prev}GMS"
+            fw_str_prev = f"{int(fw_val_prev)} grams ± {err_prev}gms"
         except:
             pass
             
@@ -1101,10 +1101,8 @@ def render_ob_preview(data, template_id):
             imp_text = f"Intra uterine pregnancy of {data.get('ga_crl', '')} +/-1w with not yet appreciable cardiac activity. Adv- Review scan after 2 weeks."
         else:
             imp_text = f"Intra uterine live pregnancy of {data.get('ga_crl', '')} +/-1w with good cardiac activity."
-            
     elif template_id == "NT_NB":
         imp_text = f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
-        
     else:
         pres_text = data.get('presentation', 'variable').lower()
         lie_text = data.get('lie', 'None')
@@ -1128,7 +1126,6 @@ def render_ob_preview(data, template_id):
     lines.append("")
     lines.append("PNDT DISCLAIMER: The radiologist has not conducted or caused to conduct any pre-natal diagnostic technique for the purpose of determining fetal sex.")
     return "\n".join(lines)
-
 # ============================================================
 # STREAMLIT UI
 # ============================================================
