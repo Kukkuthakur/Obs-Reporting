@@ -1240,11 +1240,15 @@ v = st.session_state.get("dicom_version", 0)
 sr_data = st.session_state.get("sr_data", {})
 
 # --- THE UNMISSABLE PATIENT BANNER ---
-if sr_data and 'patient_name' in sr_data:
+# We check the actual text boxes (p_name, p_age) instead of the raw dictionary
+# to ensure it matches what the typist sees on screen.
+if p_name:
     _banner_time = datetime.now().strftime("%H:%M:%S")
-    st.success(f"🚨 **LATEST SR RECEIVED FROM MACHINE:** **{sr_data.get('patient_name', 'Unknown')}** (Age: {sr_data.get('patient_age', 'N/A')}) | Time: {_banner_time}")
+    st.success(f"🚨 **ACTIVE PATIENT ON SCREEN:** **{p_name}** (Age: {p_age}) | Time: {_banner_time}")
+elif sr_data and 'patient_name' in sr_data:
+    st.success(f"🚨 **LATEST SR IN MEMORY:** **{sr_data.get('patient_name', 'Unknown')}** (Age: {sr_data.get('patient_age', 'N/A')})")
 else:
-    st.error("⚠️ **NO SR DATA RECEIVED YET.** Please ensure the listener is running and the machine has sent the SR.")
+    st.error("⚠️ **NO PATIENT DATA.** Please type a name or send an SR from the machine.")
 # -------------------------------------
 
 # --- FIX FOR PLACENTA DROPDOWN CACHING ---
