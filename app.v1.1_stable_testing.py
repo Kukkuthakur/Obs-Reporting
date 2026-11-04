@@ -784,10 +784,10 @@ def build_docx_bytes(data, template_id):
         # --- CORD LOOP ---
         p = doc.add_paragraph()
         if data.get('cord_around') or data.get('cord_straddling'):
-            if data.get('cord_around'): add_run(p, "SINGLE LOOP OF CORD AROUND THE NECK.", bold=True)
-            if data.get('cord_straddling'): add_run(p, "SINGLE LOOP OF CORD STRADDLING THE NECK.", bold=True)
+            if data.get('cord_around'): add_run(p, "Single loop of cord around the neck.", bold=True, italic=True)
+            if data.get('cord_straddling'): add_run(p, "Single loop of cord straddling the neck.", bold=True, italic=True)
         else:
-            add_run(p, "NO LOOP OF CORD SEEN AROUND THE NECK.", bold=True)
+            add_run(p, "No loop of cord seen around the neck.", bold=True, italic=True)
 
         # --- SCAR THICKNESS (T3 only) ---
         if template_id == "T3" and data.get('measure_scar'):
@@ -1109,8 +1109,8 @@ def render_ob_preview(data, template_id):
         lines.append(f"CERVIX- normal ({data.get('cervix', '')}), internal Os is {data.get('internal_os', 'closed').lower()}.")
         if data.get('cord_around') or data.get('cord_straddling'):
             parts = []
-            if data.get('cord_around'): parts.append("SINGLE LOOP OF CORD AROUND THE NECK.")
-            if data.get('cord_straddling'): parts.append("SINGLE LOOP OF CORD STRADDLING THE NECK.")
+            if data.get('cord_around'): parts.append("Single loop of cord around the neck.")
+            if data.get('cord_straddling'): parts.append("Single loop of cord straddling the neck.")
             lines.append(" ".join(parts))
         else: lines.append("NO LOOP OF CORD SEEN AROUND THE NECK.")
 
