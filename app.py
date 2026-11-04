@@ -1193,10 +1193,12 @@ if os.path.exists(json_path):
 v = st.session_state.get("dicom_version", 0)
 sr_data = st.session_state.get("sr_data", {})
 
-# FORCE NAME/AGE INTO SESSION STATE IMMEDIATELY
-if 'patient_name' in sr_data: st.session_state[f"sr_patient_name_{v}"] = sr_data['patient_name']
-if 'patient_age' in sr_data: st.session_state[f"sr_patient_age_{v}"] = sr_data['patient_age']
-if 'fetal_weight_pct' in sr_data: st.session_state[f"sr_fetal_weight_pct_edit_{v}"] = sr_data['fetal_weight_pct']
+# --- THE ACTUAL NAME FIX ---
+# We force the DICOM name into the text input's session state key immediately.
+if 'patient_name' in sr_data and sr_data['patient_name']:
+    st.session_state["p_name_input"] = sr_data['patient_name']
+if 'patient_age' in sr_data and sr_data['patient_age']:
+    st.session_state["p_age_input"] = sr_data['patient_age']
 
 c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 2, 3])
 with c1: p_name = st.text_input("Name", value=st.session_state.get(f"sr_patient_name_{v}", ""), key=f"p_name_input_{v}")
@@ -1552,8 +1554,19 @@ with col2:
     st.subheader("⬇️ Download Report")
     docx_bytes = build_docx_bytes(data, template_id)
     st.download_button(
+        # Generate a unique filename: PatientName_GA_DateTime
+    import datetime as dt
+    _now = dt.datetime.now().strftime("%d%b%Y_%H%M")
+    
+    # Clean up the name and GA to avoid invalid file characters
+    _clean_name = str(data.get('patient_name', 'Unknown')).replace(" ", "_").replace("/", "_")
+    _clean_ga = str(data.get('mean_age', 'UnknownGA')).replace(" ", "").replace("±", "")
+    
+    _filename = f"OB_{_clean_name}_{_clean_ga}_{_now}.docx"
+
+    st.download_button(
         label="Download Word Document",
         data=docx_bytes,
-        file_name=f"OB_Report_{p_name or 'Unknown'}.docx",
+        file_name=_filename,
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
