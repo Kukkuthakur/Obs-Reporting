@@ -781,8 +781,7 @@ def build_docx_bytes(data, template_id):
         # --- CERVIX ---
         p = doc.add_paragraph()
         add_run(p, "CERVIX- ", bold=True)
-        add_run(p, f"normal ({data.get('cervix', '')}), internal Os is {data.get('internal_os', 'closed').lower()}.")
-
+        add_run(p, f"normal ({data.get('cervix', '')} cm), internal Os is {data.get('internal_os', 'closed').lower()}.")
         # --- CORD LOOP ---
         p = doc.add_paragraph()
         if data.get('cord_around') or data.get('cord_straddling'):
@@ -1108,7 +1107,7 @@ def render_ob_preview(data, template_id):
             plac_str = f"is {_pos_str} and {plac_os}."
         lines.append(f"Placenta {plac_str}")
 
-        lines.append(f"CERVIX- normal ({data.get('cervix', '')}), internal Os is {data.get('internal_os', 'closed').lower()}.")
+        lines.append(f"CERVIX- normal ({data.get('cervix', '')} cm), internal Os is {data.get('internal_os', 'closed').lower()}.")
         if data.get('cord_around') or data.get('cord_straddling'):
             parts = []
             if data.get('cord_around'): parts.append("Single loop of cord around the neck.")
@@ -1568,7 +1567,16 @@ with col1:
                 "Fundal - extending antero-posteriorly",
                 "Low-Lying"
             ]
-            # The key forces Streamlit to refresh the widget
+            
+            # --- THE CACHE BUSTER ---
+            # We delete the widget from session_state on every rerun.
+            # This forces Streamlit to rebuild it with the new _plac_opts list.
+            if "placenta_pos_widget" in st.session_state:
+                del st.session_state["placenta_pos_widget"]
+            if "placenta_os_widget" in st.session_state:
+                del st.session_state["placenta_os_widget"]
+            # ------------------------
+
             data["placenta_pos"] = b1.selectbox("Placenta Position", _plac_opts, key="placenta_pos_widget")
             data["placenta_os"] = b2.selectbox("Placenta Relation to Os", ["away from the Os", "Low-lying", "Placenta Praevia"], key="placenta_os_widget")
 
