@@ -1193,16 +1193,16 @@ if os.path.exists(json_path):
 v = st.session_state.get("dicom_version", 0)
 sr_data = st.session_state.get("sr_data", {})
 
-# --- THE ACTUAL NAME FIX ---
-# We force the DICOM name into the text input's session state key immediately.
+# --- THE ACTUAL NAME/AUTO-FILL FIX ---
+# We bypass the versioning and force the name/age directly into the widget keys.
 if 'patient_name' in sr_data and sr_data['patient_name']:
     st.session_state["p_name_input"] = sr_data['patient_name']
 if 'patient_age' in sr_data and sr_data['patient_age']:
     st.session_state["p_age_input"] = sr_data['patient_age']
 
 c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 2, 3])
-with c1: p_name = st.text_input("Name", value=st.session_state.get(f"sr_patient_name_{v}", ""), key=f"p_name_input_{v}")
-with c2: p_age = st.text_input("Age", value=st.session_state.get(f"sr_patient_age_{v}", ""), key=f"p_age_input_{v}")
+with c1: p_name = st.text_input("Name", key="p_name_input")
+with c2: p_age = st.text_input("Age", key="p_age_input")
 with c3: p_sex = st.radio("Sex", ["F", "M"], horizontal=True)
 with c4: p_date = st.text_input("Date", value=datetime.now().strftime("%d-%b-%y"))
 with c5: p_ref = st.text_input("Referred by")
