@@ -112,17 +112,33 @@ def extract_sr_data(ds):
 
     # --- PATIENT NAME / AGE / SEX ---
     if hasattr(ds, 'PatientName'):
+        # Convert DICOM string to standard string and replace ^ with spaces
         raw_name = str(ds.PatientName).replace('^', ' ').strip()
+        
+        # Debug print: We can see exactly what the machine sends
+        print(f"\n[DEBUG] RAW PATIENT NAME FROM MACHINE: '{raw_name}'")
+        
         extracted['patient_name'] = raw_name
-        # Handles "RASHMI 28Y/F", "RASHMI 28 Y / F", "RASHMI 28Y"
-        m = re.search(r'\b(\d{1,3})\s*Y(?:RS?|EARS?)?\b\s*/?\s*([FM])?', raw_name, re.I)
-        if m:
-            extracted['patient_name'] = raw_name[:m.start()].strip()
-            extracted['patient_age'] = m.group(1)
-            if m.group(2):
-                extracted['p_sex'] = m.group(2).upper()
+        
+        # 1. Try to find the Age (any 1-3 digit number)
+        # This looks for "28", "28Y", "28 Y", "28Y/F", "28 Y / F", "28 Years"
+        age_match = re.search(r'(\d{1,3})', raw_name)
+        if age_match:
+            extracted['patient_age'] = age_match.group(1)
+            # Everything BEFORE the age is the name
+            extracted['patient_name'] = raw_name[:age_match.start()].strip()
+        
+        # 2. Try to find the Sex (F or M)
+        sex_match = re.search(r'([FM])', raw_name, re.I)
+        if sex_match:
+            extracted['p_sex'] = sex_match.group(1).upper()
+        elif hasattr(ds, 'PatientSex') and ds.PatientSex in ('F', 'M'):
+            extracted['p_sex'] = ds.PatientSex
+
+    # Fallback to standard DICOM tags if the string parsing failed
     if 'patient_age' not in extracted and getattr(ds, 'PatientAge', ''):
-        extracted['patient_age'] = str(ds.PatientAge).lstrip('0').rstrip('Yy') or ''
+        extracted['patient_age'] = str(ds.PatientAge).lstrip('0').replace('Y', '').strip()
+        
     if 'p_sex' not in extracted and getattr(ds, 'PatientSex', '') in ('F', 'M'):
         extracted['p_sex'] = ds.PatientSex
 
