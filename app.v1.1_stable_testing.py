@@ -253,13 +253,18 @@ def extract_sr_data(ds):
     if hasattr(ds, 'PatientName'):
         raw_name = str(ds.PatientName).replace('^', ' ').strip()
         extracted['patient_name'] = raw_name
-        # Try to split the name and age (e.g., "SHIVANI 22Y/F")
-        if 'Y/F' in raw_name.upper():
-            parts = raw_name.upper().split('Y/F')
-            age_part = parts[0].strip().split(' ')[-1] # Get the last word before Y/F (the age)
-            name_part = parts[0].strip().replace(age_part, '').strip() # Remove the age from the name
-            extracted['patient_age'] = age_part
-            extracted['patient_name'] = name_part
+        # Handles "RASHMI 28Y/F", "RASHMI 28 Y / F", "RASHMI 28Y"
+        m = re.search(r'\b(\d{1,3})\s*Y(?:RS?|EARS?)?\b\s*/?\s*([FM])?', raw_name, re.I)
+        if m:
+            extracted['patient_name'] = raw_name[:m.start()].strip()
+            extracted['patient_age'] = m.group(1)
+            if m.group(2):
+                extracted['p_sex'] = m.group(2).upper()
+    # Fallbacks from standard DICOM tags (e.g. PatientAge = "028Y")
+    if 'patient_age' not in extracted and getattr(ds, 'PatientAge', ''):
+        extracted['patient_age'] = str(ds.PatientAge).lstrip('0').rstrip('Yy') or ''
+    if 'p_sex' not in extracted and getattr(ds, 'PatientSex', '') in ('F', 'M'):
+        extracted['p_sex'] = ds.PatientSex
     # ---------------------------------------
 
     return extracted
@@ -1265,13 +1270,15 @@ if "placenta_pos_widget" not in st.session_state:
 if "placenta_os_widget" not in st.session_state:
     st.session_state["placenta_os_widget"] = "away from the Os"
 
-# --- THE ACTUAL NAME/AUTO-FILL FIX ---
-# We bypass the versioning and force the name/age directly into the widget keys.
-if 'patient_name' in sr_data and sr_data['patient_name']:
-    st.session_state["p_name_input"] = sr_data['patient_name']
-if 'patient_age' in sr_data and sr_data['patient_age']:
-    st.session_state["p_age_input"] = sr_data['patient_age']
-
+# --- NAME/AGE AUTO-FILL: apply once per new SR, so manual edits aren't overwritten ---
+if st.session_state.get("name_applied_version") != v:
+    if sr_data.get('patient_name'):
+        st.session_state["p_name_input"] = sr_data['patient_name']
+    if sr_data.get('patient_age'):
+        st.session_state["p_age_input"] = sr_data['patient_age']
+    if sr_data.get('p_sex') in ("F", "M"):
+        st.session_state["p_sex_input"] = sr_data['p_sex']
+    st.session_state["name_applied_version"] = v
 c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 2, 3])
 with c1: p_name = st.text_input("Name", key="p_name_input")
 with c2: p_age = st.text_input("Age", key="p_age_input")
@@ -1318,17 +1325,18 @@ with col1:
     
     with col_up:
         uploaded_sr = st.file_uploader("Auto-Fill from File", type=["dcm", "dicom", "ima", "json"], label_visibility="collapsed")
-        if uploaded_sr is not None:
+        if uploaded_sr is not None and st.session_state.get("last_uploaded_id") != uploaded_sr.file_id:
             try:
                 if uploaded_sr.name.endswith('.json'):
                     st.session_state["sr_data"] = json.load(uploaded_sr)
                 else:
                     ds = pydicom.dcmread(io.BytesIO(uploaded_sr.read()))
                     st.session_state["sr_data"] = extract_sr_data(ds)
-                
-                st.session_state["dicom_version"] += 1  # Force refresh
-                st.session_state["last_json_mtime"] = None # Ignore old listener file
-                st.success("DICOM SR File Loaded (Manual)")
+
+                st.session_state["dicom_version"] += 1
+                st.session_state["last_json_mtime"] = None
+                st.session_state["last_uploaded_id"] = uploaded_sr.file_id  # process each file only once
+                st.rerun()  # redraw the page so Name/Age (drawn above) see the new data
             except Exception as e:
                 st.error(f"Error reading SR: {e}")
                      
