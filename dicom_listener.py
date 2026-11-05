@@ -15,20 +15,49 @@ JSON_FILE = 'latest_sr.json'
 if not os.path.exists(STORAGE_DIR):
     os.makedirs(STORAGE_DIR)
 
+# --- DOPPLER MAPPING ---
+# SR vessel container name -> key prefix used in latest_sr.json
+SITE_KEYS = {
+    "Umbilical Artery": "umbilical",
+    "Uterine Artery": "uterine",
+    "Middle Cerebral Artery": "mca",
+    "MCA": "mca",
+}
+# SR measurement name -> key suffix
+DOPPLER_METRICS = {
+    "Systolic to Diastolic Velocity Ratio": "sd",
+    "Resistivity Index": "ri",
+    "Pulsatility Index": "pi",
+}
+
 # --- PARSER ---
 def extract_sr_data(ds):
     from datetime import datetime, timedelta
     extracted = {}
     
-    def walk_tree(seq, current_site=""):
+    def walk_tree(seq, current_site="", current_side=""):
         for item in seq:
             concept = ""
             if 'ConceptNameCodeSequence' in item:
                 concept = item.ConceptNameCodeSequence[0].get('CodeMeaning', '')
             
             new_site = current_site
-            if concept in ["Umbilical Artery", "Uterine Artery"]:
+            new_side = current_side
+            if concept in SITE_KEYS:
                 new_site = concept
+                new_side = ""
+                # Laterality is a CODE child of the vessel container (Left / Right / Unilateral...)
+                for sub in item.get('ContentSequence', []):
+                    if sub.get('ValueType', '') == 'CODE' and 'ConceptNameCodeSequence' in sub:
+                        if sub.ConceptNameCodeSequence[0].get('CodeMeaning', '') == 'Laterality':
+                            new_side = sub.ConceptCodeSequence[0].get('CodeMeaning', '').strip().lower()
+                base = SITE_KEYS[concept]
+                if new_side in ('left', 'right'):
+                    extracted.setdefault(f"{base}_sides", []).append(new_side)
+                elif new_side:
+                    extracted[f"{base}_laterality"] = new_side
+            elif 'Artery' in concept or 'MCA' in concept:
+                print(f"[?] Unmapped vessel concept in SR: '{concept}'")
 
             if item.ValueType == 'TEXT':
                 val = item.get('TextValue', '')
@@ -58,10 +87,13 @@ def extract_sr_data(ds):
                 if 'Choroid Plexus' in concept or 'Falx' in concept:
                     extracted['falx'] = "Appreciated, appear Normal"
 
-                if new_site == "Umbilical Artery" and concept == 'Pulsatility Index':
-                    extracted['umbilical_pi'] = str(num_val)
-                if new_site == "Uterine Artery" and concept == 'Pulsatility Index':
-                    extracted['uterine_pi'] = str(num_val)
+                # Doppler indices (S/D, RI, PI) for Umbilical / Uterine / MCA
+                if new_site in SITE_KEYS and concept in DOPPLER_METRICS:
+                    base = SITE_KEYS[new_site]
+                    metric = DOPPLER_METRICS[concept]
+                    extracted[f"{base}_{metric}"] = str(num_val)
+                    if new_side in ('left', 'right'):
+                        extracted[f"{base}_{new_side}_{metric}"] = str(num_val)
                 
                 if concept == 'Estimated Weight': extracted['fetal_weight'] = str(int(num_val))
                 if concept == 'Fetal Heart Rate': extracted['fhr'] = str(int(num_val))
@@ -92,7 +124,7 @@ def extract_sr_data(ds):
                 extracted['current_param'] = param_map[concept]
             
             if 'ContentSequence' in item:
-                walk_tree(item.ContentSequence, new_site)
+                walk_tree(item.ContentSequence, new_site, new_side)
             
             if concept == 'Biometry Group':
                 extracted.pop('current_param', None)
@@ -101,6 +133,17 @@ def extract_sr_data(ds):
         walk_tree(ds.ContentSequence)
         
     extracted.pop('current_param', None)
+
+    # Bilateral vessels: store a clean laterality + mean values (unsided key = mean of L/R)
+    for base in ("uterine", "mca", "umbilical"):
+        sides = extracted.pop(f"{base}_sides", [])
+        if sides:
+            extracted[f"{base}_laterality"] = "bilateral" if len(set(sides)) == 2 else sides[0]
+            for metric in ("sd", "ri", "pi"):
+                vals = [float(extracted[f"{base}_{s}_{metric}"]) for s in set(sides)
+                        if f"{base}_{s}_{metric}" in extracted]
+                if len(vals) == 2:
+                    extracted[f"{base}_{metric}"] = f"{sum(vals)/2:.2f}"
     
     today = datetime.now()
     if 'lmp' not in extracted and 'ga_lmp_days' in extracted:
@@ -129,7 +172,7 @@ def extract_sr_data(ds):
             extracted['patient_name'] = raw_name[:age_match.start()].strip()
         
         # 2. Try to find the Sex (F or M)
-        sex_match = re.search(r'([FM])', raw_name, re.I)
+        sex_match = re.search(r'\d\s*Y\w*\s*/?\s*([FM])\b', raw_name, re.I)
         if sex_match:
             extracted['p_sex'] = sex_match.group(1).upper()
         elif hasattr(ds, 'PatientSex') and ds.PatientSex in ('F', 'M'):
