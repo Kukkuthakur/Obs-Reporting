@@ -117,29 +117,39 @@ def extract_sr_data(ds):
     # then parse them in order.
     flat_items = []
     
-    def walk_tree(seq, parent_site=""):
+    VESSELS = ["Umbilical Artery", "Uterine Artery", "Fetal Doppler", "Maternal Doppler",
+               "MCA", "Middle Cerebral Artery"]
+
+    def walk_tree(seq, parent_site="", parent_side=""):
         for item in seq:
             concept = ""
             if 'ConceptNameCodeSequence' in item:
                 concept = item.ConceptNameCodeSequence[0].get('CodeMeaning', '')
             
             new_site = parent_site
+            new_side = parent_side
             # Catch any site identifier used by the machine
-            if concept in ["Umbilical Artery", "Uterine Artery", "Fetal Doppler", "Maternal Doppler", "MCA"]:
+            if concept in VESSELS:
                 new_site = concept
+                new_side = ""
+                # Laterality (Left / Right / Unilateral) is a CODE child of the vessel container
+                for sub in item.get('ContentSequence', []):
+                    if sub.get('ValueType', '') == 'CODE' and 'ConceptNameCodeSequence' in sub:
+                        if sub.ConceptNameCodeSequence[0].get('CodeMeaning', '') == 'Laterality':
+                            new_side = sub.ConceptCodeSequence[0].get('CodeMeaning', '').strip().lower()
             
-            # Store the concept, the value sequence, and the parent site
-            flat_items.append((concept, item, new_site))
+            # Store the concept, the value sequence, the parent site and the side
+            flat_items.append((concept, item, new_site, new_side))
             
             if 'ContentSequence' in item:
-                walk_tree(item.ContentSequence, new_site)
+                walk_tree(item.ContentSequence, new_site, new_side)
 
     if 'ContentSequence' in ds:
         walk_tree(ds.ContentSequence)
 
     # Now we parse the flat list
     current_param = None
-    for concept, item, site in flat_items:
+    for concept, item, site, side in flat_items:
         
         # Keep track of which biometry parameter we are under
         if concept in ['Biparietal Diameter', 'Head Circumference', 'Abdominal Circumference', 'Femur Length', 'Humerus length']:
@@ -177,23 +187,20 @@ def extract_sr_data(ds):
             if concept == 'Nasal Bone':
                 extracted['nasal_bone'] = "Present" if num_val > 0 else "Absent"
             
-            # Doppler (Handles Umbilical, Uterine, MCA properly)
-            if concept == 'Pulsatility Index':
-                if "Umbilical" in site or "Fetal" in site:
-                    extracted['umbilical_pi'] = str(round(num_val, 2))
-                elif "Uterine" in site or "Maternal" in site:
-                    # Check for Laterality to separate Left vs Right
-                    lat = ""
-                    if 'ConceptNameCodeSequence' in item:
-                        pass # Laterality is usually in the parent group
-                    
-                    # If we already have a uterine_pi, this must be the other side
-                    if 'uterine_pi' in extracted:
-                        extracted['uterine_pi_right'] = str(round(num_val, 2))
+            # Doppler (Umbilical / Uterine / MCA): PI, RI and S/D, with Left/Right for uterine
+            if concept in ('Pulsatility Index', 'Resistivity Index', 'Systolic to Diastolic Velocity Ratio'):
+                metric = {'Pulsatility Index': 'pi', 'Resistivity Index': 'ri',
+                          'Systolic to Diastolic Velocity Ratio': 'sd'}[concept]
+                if "Umbilical" in site or "Fetal" in site: base = "umbilical"
+                elif "Uterine" in site or "Maternal" in site: base = "uterine"
+                elif "MCA" in site or "Middle Cerebral" in site: base = "mca"
+                else: base = None
+                if base:
+                    val = str(round(num_val, 2))
+                    if base == "uterine" and side in ("left", "right"):
+                        extracted[f"uterine_{side}_{metric}"] = val
                     else:
-                        extracted['uterine_pi'] = str(round(num_val, 2))
-                elif "MCA" in site:
-                    extracted['mca_pi'] = str(round(num_val, 2))
+                        extracted[f"{base}_{metric}"] = val
 
             # Summary & Ratios
             if concept == 'Estimated Weight': 
@@ -230,6 +237,13 @@ def extract_sr_data(ds):
         if concept in ['Biometry Group', 'Fetal Long Bones']:
             current_param = None
     
+    # Uterine mean of left/right (unsided key = mean, same as the listener)
+    for metric in ("pi", "ri", "sd"):
+        vals = [float(extracted[f"uterine_{s}_{metric}"]) for s in ("left", "right")
+                if f"uterine_{s}_{metric}" in extracted]
+        if vals:
+            extracted[f"uterine_{metric}"] = f"{sum(vals)/len(vals):.2f}"
+
     # Date calculations
     today = datetime.now()
     if 'lmp' not in extracted and 'ga_lmp_days' in extracted:
@@ -343,6 +357,126 @@ def generate_afi_text(afi_val, is_total=True):
 # ============================================================
 # DOCX BUILDER
 # ============================================================
+PLACENTA_OPTS = ["Anterior", "Posterior", "Fundo-Anterior", "Fundo-Posterior",
+                 "Fundal extending antero-posteriorly"]
+
+LIE_OPTIONS = ["None", "LOA", "ROA", "LOP", "ROP", "LOL", "ROL"]
+LIE_LABELS = {
+    "None": "None",
+    "LOA": "Left Occiputo-Anterior", "ROA": "Right Occiputo-Anterior",
+    "LOP": "Left Occiputo-Posterior", "ROP": "Right Occiputo-Posterior",
+    "LOL": "Left Occiputo-Lateral", "ROL": "Right Occiputo-Lateral",
+}
+
+PRESENTATION_OPTIONS = ["CEPHALIC", "BREECH", "OBLIQUE LIE", "TRANSVERSE LIE"]
+
+def _is_lie_presentation(data):
+    return str(data.get('presentation', '') or '').upper() in ("OBLIQUE LIE", "TRANSVERSE LIE")
+
+def presentation_text(data):
+    """Wording for the top line and impression.
+    Cephalic  -> 'Cephalic presentation & Left Occiputo-Anterior lie' (lie optional)
+    Breech    -> 'Breech presentation'
+    Oblique / Transverse -> 'Oblique Lie with head in Right upper quadrant'"""
+    pres = str(data.get('presentation', 'variable') or 'variable').upper()
+    if pres in ("OBLIQUE LIE", "TRANSVERSE LIE"):
+        side = str(data.get('head_side', '') or '').strip()
+        level = str(data.get('head_level', '') or '').strip().lower()
+        quad = f" with head in {side} {level} quadrant" if side and level else ""
+        return f"{pres.title()}{quad}"
+    text = f"{pres.capitalize()} presentation"
+    lie = data.get('lie', 'None')
+    if pres == "CEPHALIC" and lie and lie != "None":
+        text += f" & {LIE_LABELS.get(lie, lie)} lie"
+    return text
+
+def scar_text(val):
+    """Scar thickness with grading: >2 mm Adequate, =2.0 mm Borderline adequate, <2 mm Reduced."""
+    s = str(val if val is not None else "").strip()
+    if not s:
+        return ""
+    m = re.fullmatch(r'(\d+(?:\.\d+)?)\s*(?:mm)?', s, re.I)
+    if not m:
+        return f"{s} mm"
+    num = float(m.group(1))
+    grade = "Adequate" if num > 2 else ("Reduced" if num < 2 else "Borderline adequate")
+    return f"{m.group(1)} mm ({grade})"
+
+def fmt_cm(val):
+    """Cervical length in cm: '3.5' / '3.5cm' -> '3.5 cm'; '35 mm' -> '3.5 cm'.
+    A bare number above 10 can only be millimetres, so it is converted. Text such as 'Normal' is left alone."""
+    s = str(val if val is not None else "").strip()
+    if not s:
+        return ""
+    m = re.fullmatch(r'(\d+(?:\.\d+)?)\s*(mm|cm)?', s, re.I)
+    if not m:
+        return s
+    num = float(m.group(1))
+    unit = (m.group(2) or "").lower()
+    if unit == "mm" or (unit == "" and num > 10):
+        num /= 10
+    return f"{num:g} cm"
+
+def _fmt_date(s):
+    """04-01-2027 -> 04/01/2027"""
+    s = str(s or "").strip()
+    return re.sub(r'^(\d{1,2})-(\d{1,2})-(\d{4})$', r'\1/\2/\3', s)
+
+def _split_ga(s):
+    """'22w1d' / '19weeks 5days ± 2w' -> (22, 1) / (19, 5); None if not parseable."""
+    m = re.search(r'(\d+)\s*w(?:eeks?)?\s*(?:(\d+)\s*d)?', str(s or '').lower())
+    return (int(m.group(1)), int(m.group(2) or 0)) if m else None
+
+def dating_rows(data):
+    """Rows for the Dating table: (label, LMP text, GA weeks text, GA days text, EDD)."""
+    def ga_cells(ga):
+        if not ga: return "-", "-"
+        w, d = ga
+        return f"{w} Weeks", f"{d} {'Day' if d == 1 else 'Days'}"
+    rows = []
+    lmp = str(data.get('lmp', '') or '').strip()
+    if lmp and lmp != "Not Sure":
+        wk, dy = ga_cells(_split_ga(data.get('ga_lmp')))
+        rows.append(("By LMP", f"LMP: {_fmt_date(lmp)}", wk, dy, _fmt_date(data.get('edd_lmp', '')) or "-"))
+    wk, dy = ga_cells(_split_ga(data.get('mean_age') or data.get('ga_crl')))
+    rows.append(("By USG", "", wk, dy, _fmt_date(data.get('edd_cua', '')) or "-"))
+    return rows
+
+def add_dating_table(doc, data):
+    rows = dating_rows(data)
+    tbl = doc.add_table(rows=1 + len(rows), cols=5)
+    set_table_borders(tbl)
+    tbl.alignment = WD_TABLE_ALIGNMENT.LEFT
+    widths = [Cm(2.6), Cm(4.0), Cm(2.4), Cm(2.4), Cm(3.0)]
+    for r in tbl.rows:
+        for i, w in enumerate(widths):
+            r.cells[i].width = w
+    for i, text in {0: "Dating", 1: "LMP", 4: "EDD"}.items():
+        c = tbl.cell(0, i)
+        set_cell_background(c, get_gradient_color(0))
+        c.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        add_run(c.paragraphs[0], text, bold=True, size=10)
+    ga_head = tbl.cell(0, 2).merge(tbl.cell(0, 3))
+    set_cell_background(ga_head, get_gradient_color(0))
+    ga_head.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    add_run(ga_head.paragraphs[0], "GA", bold=True, size=10)
+    for ri, vals in enumerate(rows, start=1):
+        for ci, t in enumerate(vals):
+            c = tbl.cell(ri, ci)
+            c.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            add_run(c.paragraphs[0], t, size=10)
+    return tbl
+
+def dating_preview(data):
+    rows = dating_rows(data)
+    out = [f"  {'Dating':<9}{'LMP':<20}{'GA':<20}{'EDD'}"]
+    for label, lmp, wk, dy, edd in rows:
+        out.append(f"  {label:<9}{lmp:<20}{(wk + ' ' + dy):<20}{edd}")
+    return out
+
+DOPPLER_KEYS = [f"{vsl}_{m}" for vsl in ("umbilical", "uterine", "uterine_left", "uterine_right", "mca")
+                for m in ("pi", "ri", "sd")]
+
 def generate_doppler_text(data):
     doppler_lines = []
     if data.get("umbilical_pi"):
@@ -374,26 +508,28 @@ def build_docx_bytes(data, template_id):
     style.paragraph_format.space_before = Pt(0)
 
     # === FLEXIBLE TOP SPACER ===
-    # Adds exactly 2 blank lines (11pt) above the patient demographics box
-    # to leave room for pre-printed stationery/letterhead.
+    
+    # 2 blank lines (10pt) to push the report down
     for _ in range(2):
         _p = doc.add_paragraph()
         _p.paragraph_format.space_after = Pt(0)
         _p.paragraph_format.space_before = Pt(0)
         _p.paragraph_format.line_spacing = 1.0
-        _run = _p.add_run("")
-        _run.font.name = "Calibri"
-        _run.font.size = Pt(11)
-        
-    # Adds 2 more blank lines (10pt) to push the report down further
-    for _ in range(2):
-        _p = doc.add_paragraph()
-        _p.paragraph_format.space_after = Pt(0)
-        _p.paragraph_format.space_before = Pt(0)
-        _p.paragraph_format.line_spacing = 1.0
-        _run = _p.add_run("")
+        # Adding a zero-width space so Word doesn't merge the empty paragraphs
+        _run = _p.add_run("\u200B") 
         _run.font.name = "Calibri"
         _run.font.size = Pt(10)
+        
+    # 2 tiny blank lines (5pt) for fine-tuning
+    for _ in range(2):
+        _p = doc.add_paragraph()
+        _p.paragraph_format.space_after = Pt(0)
+        _p.paragraph_format.space_before = Pt(0)
+        _p.paragraph_format.line_spacing = 1.0
+        _run = _p.add_run("\u200B")
+        _run.font.name = "Calibri"
+        _run.font.size = Pt(5)
+        
     # === END SPACER ===
 
     # 1. HEADER TABLE
@@ -423,13 +559,6 @@ def build_docx_bytes(data, template_id):
     p_gap2.paragraph_format.space_after = Pt(0)
     p_gap2.paragraph_format.line_spacing = Pt(5)
     
-    lmp_p = doc.add_paragraph()
-    lmp_p.paragraph_format.space_after = Pt(0)
-    if data.get('lmp') == "Not Sure":
-        add_run(lmp_p, f"LMP- {data.get('lmp', '')}", bold=False, italic=True)
-    else:
-        add_run(lmp_p, f"LMP- {data.get('lmp', '')}", bold=True)
-        
     # 5pt gap
     p_gap3 = doc.add_paragraph()
     p_gap3.paragraph_format.space_after = Pt(0)
@@ -450,7 +579,7 @@ def build_docx_bytes(data, template_id):
             ("G-Sac", data.get('gsac', 'Seen')), ("CRL", data.get('crl', '')),
             ("Yolk sac", data.get('yolk', 'Not Seen')), ("Cardiac pulsations", cardiac),
             ("Decidual reaction", "Present"), ("Subchorionic collection", subchorionic),
-            ("Corpus leuteal cyst", corpus), ("Cervix", data.get('cervix', 'Normal')),
+            ("Corpus leuteal cyst", corpus), ("Cervix", fmt_cm(data.get('cervix', 'Normal'))),
             ("Internal Os", "Closed"), ("Placenta", "-"),
         ]
         for i, (label, val) in enumerate(early_data):
@@ -458,18 +587,7 @@ def build_docx_bytes(data, template_id):
             add_run(early_table.cell(i, 1).paragraphs[0], val, italic=True, size=10)
         doc.add_paragraph()
 
-        edd_table = doc.add_table(rows=2, cols=3)
-        set_table_borders(edd_table)
-        for row in edd_table.rows:
-            row.cells[0].width = Cm(3.5); row.cells[1].width = Cm(5.0); row.cells[2].width = Cm(3.0)
-        edd_data = [
-            ("EDD (LMP)", data.get('edd_lmp', '') if data.get('lmp') != "Not Sure" else "-", "±2W"),
-            ("EDD (CUA)", data.get('edd_cua', ''), "±2W"),
-        ]
-        for i, (label, date, err) in enumerate(edd_data):
-            add_run(edd_table.cell(i, 0).paragraphs[0], label, italic=True, size=10)
-            add_run(edd_table.cell(i, 1).paragraphs[0], date, size=10)
-            add_run(edd_table.cell(i, 2).paragraphs[0], err, size=10)
+        add_dating_table(doc, data)
 
     # 3.5 NT_NB SCAN
     elif template_id == "NT_NB":
@@ -482,7 +600,7 @@ def build_docx_bytes(data, template_id):
             ("CRL", f"{data.get('crl', '')}mm", "NT", f"{data.get('nt', '')}mm"),
             ("Nasal Bone", data.get('nasal_bone', ''), "FHR", f"{data.get('fhr_val', '')} bpm"),
             ("DV PI", data.get('dv_pi', ''), "DV A-Wave", data.get('dv_awave', '')),
-            ("Placenta", data.get('placenta_pos', ''), "Cervix", f"{data.get('cervix', '')}cm"),
+            ("Placenta", data.get('placenta_pos', ''), "Cervix", fmt_cm(data.get('cervix', ''))),
         ]
         
         for i, (l1, v1, l2, v2) in enumerate(nt_data):
@@ -493,18 +611,7 @@ def build_docx_bytes(data, template_id):
             
         doc.add_paragraph()
         
-        edd_table = doc.add_table(rows=2, cols=3)
-        set_table_borders(edd_table)
-        for row in edd_table.rows:
-            row.cells[0].width = Cm(3.5); row.cells[1].width = Cm(5.0); row.cells[2].width = Cm(3.0)
-        edd_data = [
-            ("EDD (LMP)--", data.get('edd_lmp', '') if data.get('lmp') != "Not Sure" else "-", "±2W"),
-            ("EDD (CUA)--", data.get('edd_cua', ''), "±2W"),
-        ]
-        for i, (label, date, err) in enumerate(edd_data):
-            add_run(edd_table.cell(i, 0).paragraphs[0], label, bold=True, italic=True, size=10)
-            add_run(edd_table.cell(i, 1).paragraphs[0], date, italic=True, size=10)
-            add_run(edd_table.cell(i, 2).paragraphs[0], err, italic=True, size=10)
+        add_dating_table(doc, data)
 
     # 4. STANDARD OB
     else:
@@ -512,20 +619,7 @@ def build_docx_bytes(data, template_id):
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         
         # Combine Presentation and Lie
-        pres_text = data.get('presentation', 'variable').lower()
-        lie_text = data.get('lie', 'None')
-        
-        lie_map = {
-            "LOA": "Left Occiputo-Anterior",
-            "ROA": "Right Occiputo-Anterior",
-            "LOP": "Left Occiputo-Posterior",
-            "ROP": "Right Occiputo-Posterior"
-        }
-        
-        if lie_text != "None":
-            pres_text = f"{pres_text.capitalize()} presentation & {lie_map.get(lie_text, lie_text)} lie"
-        else:
-            pres_text = f"{pres_text.capitalize()} presentation"
+        pres_text = presentation_text(data)
             
         add_run(p, f"Uterus shows single live fetus. Fetus is in ")
         add_run(p, f"{pres_text}", bold=True, italic=True)
@@ -710,114 +804,66 @@ def build_docx_bytes(data, template_id):
         add_run(p, "Foetal heart rate ", bold=True); add_run(p, f"is approx. {data.get('fhr', '')}.", italic=True)
         doc.add_paragraph()
 
-        # --- EDD TABLE ---
-        # 1. Safely get the EDDs. If they are empty, use a dash.
-        _lmp_val = data.get('lmp', '')
-        _edd_lmp = data.get('edd_lmp', '')
-        _edd_cua = data.get('edd_cua', '')
-        
-        # 2. Determine if we need 1 or 2 rows based on LMP status
-        if _lmp_val == "Not Sure":
-            edd_data = [("EDD (CUA)--", _edd_cua, "±2W")]
-            num_rows = 1
-        else:
-            edd_data = [
-                ("EDD (LMP)--", _edd_lmp, "±2W"),
-                ("EDD (CUA)--", _edd_cua, "±2W"),
-            ]
-            num_rows = 2
-
-        # 3. Build the table
-        edd_table = doc.add_table(rows=num_rows, cols=3)
-        set_table_borders(edd_table)
-        
-        # 4. Set widths
-        for row in edd_table.rows:
-            row.cells[0].width = Cm(3.5)
-            row.cells[1].width = Cm(5.0)
-            row.cells[2].width = Cm(3.0)
-            
-        # 5. Fill the cells with formatting
-        for i, (label, date, err) in enumerate(edd_data):
-            cell_0 = edd_table.cell(i, 0)
-            cell_1 = edd_table.cell(i, 1)
-            cell_2 = edd_table.cell(i, 2)
-            
-            # Clear default paragraph
-            cell_0.text = ""
-            cell_1.text = ""
-            cell_2.text = ""
-            
-            add_run(cell_0.paragraphs[0], label, bold=True, italic=True, size=10)
-            add_run(cell_1.paragraphs[0], str(date), italic=True, size=10)
-            add_run(cell_2.paragraphs[0], err, italic=True, size=10)
-            
-        # 5. Add a gap after the table so it doesn't collide with the Doppler section
+        # --- DATING TABLE (LMP / USG: GA and EDD) ---
+        add_dating_table(doc, data)
         doc.add_paragraph()
-        # --- END EDD TABLE ---
 
         # --- PLACENTA ---
         p = doc.add_paragraph()
         add_run(p, "Placenta ", bold=True)
-        plac_pos = data.get('placenta_pos', 'ANTERIOR')
+        plac_pos = data.get('placenta_pos', 'Anterior')
         plac_os = data.get('placenta_os', 'away from the Os')
         
+        # Add the bold italic position
+        add_run(p, "is ", italic=False)
+        add_run(p, plac_pos.lower(), bold=True, italic=True)
+        
         if plac_os == "Placenta Praevia":
-            plac_str = f"is {plac_pos} and Placenta Praevia ({data.get('praevia_grade', 'Grade I')})."
+            plac_str = f" and Placenta Praevia ({data.get('praevia_grade', 'Grade I')})."
         elif plac_os == "Low-lying":
             dist = data.get('placenta_dist', '')
-            plac_str = f"is {plac_pos} and Low-lying, about {dist}cm away from the Internal Os." if dist.strip() else f"is {plac_pos} and Low-lying, but away from the Internal Os."
+            plac_str = f" and Low-lying, about {dist}cm away from the Internal Os." if dist.strip() else f" and Low-lying, but away from the Internal Os."
         else:
-            plac_str = f"is {plac_pos} and {plac_os}."
+            plac_str = f" and {plac_os}."
         add_run(p, plac_str)
 
         # --- CERVIX ---
         p = doc.add_paragraph()
         add_run(p, "CERVIX- ", bold=True)
-        add_run(p, f"normal ({data.get('cervix', '')}), internal Os is {data.get('internal_os', 'closed').lower()}.")
+        _cx = fmt_cm(data.get('cervix', ''))
+        add_run(p, f"normal ({_cx}), internal Os is {data.get('internal_os', 'closed').lower()}." if _cx
+                else f"normal, internal Os is {data.get('internal_os', 'closed').lower()}.")
 
         # --- CORD LOOP ---
         p = doc.add_paragraph()
         if data.get('cord_around') or data.get('cord_straddling'):
-            if data.get('cord_around'): add_run(p, "SINGLE LOOP OF CORD AROUND THE NECK.", bold=True)
-            if data.get('cord_straddling'): add_run(p, "SINGLE LOOP OF CORD STRADDLING THE NECK.", bold=True)
+            if data.get('cord_around'): add_run(p, "Single loop of cord around the neck.", bold=True, italic=True)
+            if data.get('cord_straddling'): add_run(p, "Single loop of cord straddling the neck.", bold=True, italic=True)
         else:
-            add_run(p, "NO LOOP OF CORD SEEN AROUND THE NECK.", bold=True)
+            add_run(p, "No loop of cord seen around the neck.", bold=True, italic=True)
 
         # --- SCAR THICKNESS (T3 only) ---
         if template_id == "T3" and data.get('measure_scar'):
             p = doc.add_paragraph()
             add_run(p, "Scar Thickness: ", bold=True)
-            add_run(p, f"{data.get('scar_size', '')} mm", italic=True)
+            add_run(p, scar_text(data.get('scar_size', '')), italic=True)
 
         # --- DOPPLER SECTION WITH DYNAMIC TABLE ---
-        if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
+        if any(data.get(k) for k in DOPPLER_KEYS):
             doc.add_paragraph()
             doppler_head = doc.add_paragraph()
             add_run(doppler_head, "DOPPLER INDICES:", bold=True, underline=True)
             
-            # Check if MCA is present
-            mca_present = bool(data.get("mca_pi"))
-            
-            # Create a horizontal table: Vessel | Value | Notching | Percentile (| MCA Percentile)
-            num_cols = 5 if mca_present else 4
-            dop_table = doc.add_table(rows=1, cols=num_cols)
+            # Table: Vessel | PI | RI | S/D | Notching | Percentile
+            dop_table = doc.add_table(rows=1, cols=6)
             set_table_borders(dop_table)
-            dop_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            dop_table.alignment = WD_TABLE_ALIGNMENT.LEFT
             
-            # Set column widths dynamically to match Biometry table total width (16.5cm)
-            if mca_present:
-                # 4 + 2 + 3 + 3.5 + 4 = 16.5
-                dop_widths = [Cm(4.0), Cm(2.0), Cm(3.0), Cm(3.5), Cm(4.0)]
-            else:
-                # 4.5 + 2.5 + 3.5 + 6 = 16.5
-                dop_widths = [Cm(4.5), Cm(2.5), Cm(3.5), Cm(6.0)]
+            # 3.6 + 1.7 + 1.7 + 1.7 + 2.5 + 2.8 = 14.0 cm (matches Biometry table)
+            dop_widths = [Cm(3.6), Cm(1.7), Cm(1.7), Cm(1.7), Cm(2.5), Cm(2.8)]
             
             # 1. Header Row
-            headers = ["Vessel", "PI Value", "Notching", "Percentile"]
-            if mca_present:
-                headers.append("MCA (Percentile)")
-                
+            headers = ["Vessel", "PI", "RI", "S/D", "Notching", "Percentile"]
             for i, text in enumerate(headers):
                 cell = dop_table.cell(0, i)
                 cell.width = dop_widths[i]
@@ -827,77 +873,71 @@ def build_docx_bytes(data, template_id):
             
             # 2. Build the rows for each vessel
             row_idx = 1
-            def add_doppler_row(vessel_name, pi_val, notching_text, pct_val, mca_pct_val=""):
+            def add_doppler_row(vessel_name, pi_val, ri_val, sd_val, notching_text, pct_val):
                 nonlocal row_idx
                 row_cells = dop_table.add_row().cells
                 bg_color = get_gradient_color(row_idx)
                 
-                # Vessel Name
-                row_cells[0].width = dop_widths[0]
-                set_cell_background(row_cells[0], bg_color)
-                add_run(row_cells[0].paragraphs[0], vessel_name, size=10)
-                
-                # PI Value
-                row_cells[1].width = dop_widths[1]
-                set_cell_background(row_cells[1], bg_color)
-                row_cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                add_run(row_cells[1].paragraphs[0], pi_val if pi_val else "-", size=10)
-                
-                # Notching
-                row_cells[2].width = dop_widths[2]
-                set_cell_background(row_cells[2], bg_color)
-                row_cells[2].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                add_run(row_cells[2].paragraphs[0], notching_text if notching_text else "-", size=10)
+                texts = [vessel_name, pi_val, ri_val, sd_val, notching_text]
+                for i, t in enumerate(texts):
+                    row_cells[i].width = dop_widths[i]
+                    set_cell_background(row_cells[i], bg_color)
+                    if i > 0:
+                        row_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    add_run(row_cells[i].paragraphs[0], t if t else "-", size=10)
                 
                 # Percentile (Text + Bar)
-                row_cells[3].width = dop_widths[3]
-                set_cell_background(row_cells[3], bg_color)
-                row_cells[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
+                row_cells[5].width = dop_widths[5]
+                set_cell_background(row_cells[5], bg_color)
+                row_cells[5].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 if pct_val:
                     try:
                         bar_img = generate_percentile_bar(pct_val)
                         if bar_img:
-                            p = row_cells[3].paragraphs[0]
+                            p = row_cells[5].paragraphs[0]
                             p.paragraph_format.space_after = Pt(0)
                             add_run(p, f"{pct_val}% ", bold=True, size=9)
-                            p.add_run().add_picture(bar_img, width=Cm(2.5))
+                            p.add_run().add_picture(bar_img, width=Cm(2.0))
                     except:
                         pass
                 else:
-                    add_run(row_cells[3].paragraphs[0], "-", size=10)
-                    
-                # 5th Column (MCA only)
-                if mca_present:
-                    row_cells[4].width = dop_widths[4]
-                    set_cell_background(row_cells[4], bg_color)
-                    row_cells[4].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    
-                    if vessel_name == "MCA" and mca_pct_val:
-                        try:
-                            bar_img = generate_percentile_bar(mca_pct_val)
-                            if bar_img:
-                                p = row_cells[4].paragraphs[0]
-                                p.paragraph_format.space_after = Pt(0)
-                                add_run(p, f"{mca_pct_val}% ", bold=True, size=9)
-                                p.add_run().add_picture(bar_img, width=Cm(2.5))
-                        except:
-                            pass
-                    else:
-                        add_run(row_cells[4].paragraphs[0], "-", size=10)
+                    add_run(row_cells[5].paragraphs[0], "-", size=10)
                 
                 row_idx += 1
             
+            def _has(*keys):
+                return any(data.get(k) for k in keys)
+            
             # Add the specific vessels
-            if data.get("umbilical_pi"):
-                add_doppler_row("Umbilical Artery", data.get("umbilical_pi"), "", data.get("umbilical_pct"))
-                
-            if data.get("uterine_pi"):
-                notching = data.get("uterine_notching", "No notching")
-                add_doppler_row("Uterine Artery", data.get("uterine_pi"), notching, data.get("uterine_pct"))
-                
-            if mca_present:
-                add_doppler_row("MCA", data.get("mca_pi"), "", data.get("mca_pct"), data.get("mca_pct"))
+            if _has("umbilical_pi", "umbilical_ri", "umbilical_sd"):
+                add_doppler_row("Umbilical Artery", data.get("umbilical_pi"), data.get("umbilical_ri"),
+                                data.get("umbilical_sd"), "", data.get("umbilical_pct"))
+            
+            has_left = _has("uterine_left_pi", "uterine_left_ri", "uterine_left_sd")
+            has_right = _has("uterine_right_pi", "uterine_right_ri", "uterine_right_sd")
+            notching = data.get("uterine_notching", "No notching")
+
+            def _ut_row(label, prefix, notch, pct):
+                add_doppler_row(label, data.get(f"{prefix}_pi"), data.get(f"{prefix}_ri"),
+                                data.get(f"{prefix}_sd"), notch, pct)
+
+            if has_left and has_right:
+                _ut_row("Lt. Uterine Artery", "uterine_left", "", "")
+                _ut_row("Rt. Uterine Artery", "uterine_right", "", "")
+                if _has("uterine_pi", "uterine_ri", "uterine_sd"):
+                    _ut_row("Uterine Artery (Mean)", "uterine", notching, data.get("uterine_pct"))
+            elif has_left or has_right:
+                # Only one side measured: show it by name, carrying the notching and percentile
+                if has_left:
+                    _ut_row("Lt. Uterine Artery", "uterine_left", notching, data.get("uterine_pct"))
+                else:
+                    _ut_row("Rt. Uterine Artery", "uterine_right", notching, data.get("uterine_pct"))
+            elif _has("uterine_pi", "uterine_ri", "uterine_sd"):
+                _ut_row("Uterine Artery", "uterine", notching, data.get("uterine_pct"))
+
+            if _has("mca_pi", "mca_ri", "mca_sd"):
+                add_doppler_row("MCA", data.get("mca_pi"), data.get("mca_ri"), data.get("mca_sd"),
+                                "", data.get("mca_pct"))
 
     # 5. IMPRESSION
     doc.add_paragraph()
@@ -914,22 +954,9 @@ def build_docx_bytes(data, template_id):
     elif template_id == "NT_NB":
         imp_text = f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
     else:
-        pres_text = data.get('presentation', 'variable').lower()
-        lie_text = data.get('lie', 'None')
-        
-        lie_map = {
-            "LOA": "Left Occiputo-Anterior",
-            "ROA": "Right Occiputo-Anterior",
-            "LOP": "Left Occiputo-Posterior",
-            "ROP": "Right Occiputo-Posterior"
-        }
-        
-        if lie_text != "None":
-            pres_text = f"{pres_text.capitalize()} presentation & {lie_map.get(lie_text, lie_text)} lie"
-        else:
-            pres_text = f"{pres_text.capitalize()} presentation"
+        pres_text = presentation_text(data)
             
-        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text} of approx. {mean_age} gestation age."
+        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text}{',' if _is_lie_presentation(data) else ''} of approx. {mean_age} gestation age."
     p = doc.add_paragraph(); add_run(p, imp_text, bold=True, italic=True)
 
     # 6. PNDT & NOTE COMBINED BOX
@@ -961,8 +988,6 @@ def render_ob_preview(data, template_id):
     lines.append("")
     lines.append("         ULTRASOUND OBSTETRICS REPORT")
     lines.append("")
-    lines.append(f"LMP- {data.get('lmp', '')}")
-    lines.append("")
 
     if template_id == "EARLY_OBS":
         subchorionic = "Absent" if not data.get("subchorionic_present") else f"Present; {data.get('subchorionic_grade', 'Grade-I')}"
@@ -972,13 +997,12 @@ def render_ob_preview(data, template_id):
             ("G-Sac", data.get('gsac', 'Seen')), ("CRL", data.get('crl', '')),
             ("Yolk sac", data.get('yolk', 'Not Seen')), ("Cardiac pulsations", cardiac),
             ("Decidual reaction", "Present"), ("Subchorionic collection", subchorionic),
-            ("Corpus leuteal cyst", corpus), ("Cervix", data.get('cervix', 'Normal')),
+            ("Corpus leuteal cyst", corpus), ("Cervix", fmt_cm(data.get('cervix', 'Normal'))),
             ("Internal Os", "Closed"), ("Placenta", "-"),
         ]
         for label, val in early_rows: lines.append(f"  {label:<28}: {val}")
         lines.append("")
-        lines.append(f"  {'EDD (LMP)':<20}: {data.get('edd_lmp', '') if data.get('lmp') != 'Not Sure' else '-'}    ±2W")
-        lines.append(f"  {'EDD (CUA)':<20}: {data.get('edd_cua', '')}    ±2W")
+        lines.extend(dating_preview(data))
 
     elif template_id == "NT_NB":
         lines.append("NT / NB SCAN DETAILS:")
@@ -989,27 +1013,13 @@ def render_ob_preview(data, template_id):
         lines.append(f"  DV PI: {data.get('dv_pi', '')} (A-wave: {data.get('dv_awave', '')})")
         lines.append("")
         lines.append(f"  Placenta: {data.get('placenta_pos', '')}")
-        lines.append(f"  Cervix: {data.get('cervix', '')}cm")
+        lines.append(f"  Cervix: {fmt_cm(data.get('cervix', ''))}")
         lines.append("")
-        lines.append(f"  EDD (LMP): {data.get('edd_lmp', '')}")
-        lines.append(f"  EDD (CUA): {data.get('edd_cua', '')}")
+        lines.extend(dating_preview(data))
 
     else:
         # Combine Presentation and Lie
-        pres_text = data.get('presentation', 'variable').lower()
-        lie_text = data.get('lie', 'None')
-        
-        lie_map = {
-            "LOA": "Left Occiputo-Anterior",
-            "ROA": "Right Occiputo-Anterior",
-            "LOP": "Left Occiputo-Posterior",
-            "ROP": "Right Occiputo-Posterior"
-        }
-        
-        if lie_text != "None":
-            pres_text = f"{pres_text.capitalize()} presentation & {lie_map.get(lie_text, lie_text)} lie"
-        else:
-            pres_text = f"{pres_text.capitalize()} presentation"
+        pres_text = presentation_text(data)
             
         lines.append(f"Uterus shows single live fetus. Fetus is in {pres_text} at the time of scanning. Fetal movements are present. Fetal cardiac pulsations are appreciated.")
         lines.append("")
@@ -1076,54 +1086,65 @@ def render_ob_preview(data, template_id):
         lines.append(f"Foetal heart rate is approx. {data.get('fhr', '')}.")
         lines.append("")
 
-        # --- EDD PREVIEW FIX ---
-        _lmp_val = data.get('lmp', '')
-        _edd_lmp = data.get('edd_lmp', '')
-        _edd_cua = data.get('edd_cua', '')
-        
-        if _lmp_val != 'Not Sure':
-            lines.append(f"  {'EDD (LMP)--':<18}: {_edd_lmp}    ±2W")
-            
-        lines.append(f"  {'EDD (CUA)--':<18}: {_edd_cua}    ±2W")
+        lines.extend(dating_preview(data))
         lines.append("")
-        # -----------------------
-        plac_pos = data.get('placenta_pos', 'ANTERIOR'); plac_os = data.get('placenta_os', 'away from the Os')
-        if plac_os == "Placenta Praevia": plac_str = f"is {plac_pos} and Placenta Praevia ({data.get('praevia_grade', 'Grade I')})."
+        plac_pos = data.get('placenta_pos', 'Anterior'); plac_os = data.get('placenta_os', 'away from the Os')
+        
+        # Build the base position string
+        _pos_str = plac_pos.lower()
+        
+        if plac_os == "Placenta Praevia": 
+            plac_str = f"is {_pos_str} and Placenta Praevia ({data.get('praevia_grade', 'Grade I')})."
         elif plac_os == "Low-lying":
             dist = data.get('placenta_dist', '')
-            plac_str = f"is {plac_pos} and Low-lying, about {dist}cm away from the Internal Os." if dist.strip() else f"is {plac_pos} and Low-lying, but away from the Internal Os."
-        else: plac_str = f"is {plac_pos} and {plac_os}."
+            plac_str = f"is {_pos_str} and Low-lying, about {dist}cm away from the Internal Os." if dist.strip() else f"is {_pos_str} and Low-lying, but away from the Internal Os."
+        else: 
+            plac_str = f"is {_pos_str} and {plac_os}."
         lines.append(f"Placenta {plac_str}")
 
-        lines.append(f"CERVIX- normal ({data.get('cervix', '')}), internal Os is {data.get('internal_os', 'closed').lower()}.")
+        _cx = fmt_cm(data.get('cervix', ''))
+        lines.append(f"CERVIX- normal ({_cx}), internal Os is {data.get('internal_os', 'closed').lower()}." if _cx
+                     else f"CERVIX- normal, internal Os is {data.get('internal_os', 'closed').lower()}.")
         if data.get('cord_around') or data.get('cord_straddling'):
             parts = []
-            if data.get('cord_around'): parts.append("SINGLE LOOP OF CORD AROUND THE NECK.")
-            if data.get('cord_straddling'): parts.append("SINGLE LOOP OF CORD STRADDLING THE NECK.")
+            if data.get('cord_around'): parts.append("Single loop of cord around the neck.")
+            if data.get('cord_straddling'): parts.append("Single loop of cord straddling the neck.")
             lines.append(" ".join(parts))
         else: lines.append("NO LOOP OF CORD SEEN AROUND THE NECK.")
 
         if template_id == "T3" and data.get('measure_scar'): 
-            lines.append(f"Scar Thickness: {data.get('scar_size', '')} mm")
+            lines.append(f"Scar Thickness: {scar_text(data.get('scar_size', ''))}")
 
         # --- DOPPLER SECTION PREVIEW ---
-        if data.get("umbilical_pi") or data.get("uterine_pi") or data.get("mca_pi"):
+        if any(data.get(k) for k in DOPPLER_KEYS):
             lines.append("")
             lines.append("DOPPLER INDICES:")
             
-            if data.get("umbilical_pi"):
-                ua_str = f"  Umbilical Artery: PI = {data.get('umbilical_pi')}"
-                if data.get("umbilical_pct"): ua_str += f" (Percentile: {data.get('umbilical_pct')}%)"
-                lines.append(ua_str)
-                
-            if data.get("uterine_pi"):
-                notching = data.get("uterine_notching", "No notching")
-                uta_str = f"  Uterine Artery: PI = {data.get('uterine_pi')} ({notching})"
-                if data.get("uterine_pct"): uta_str += f" (Percentile: {data.get('uterine_pct')}%)"
-                lines.append(uta_str)
-                
-            if data.get("mca_pi"):
-                lines.append(f"  MCA: PI = {data.get('mca_pi')}")
+            def _dop_line(label, prefix, extra=""):
+                parts = []
+                for m, name in (("pi", "PI"), ("ri", "RI"), ("sd", "S/D")):
+                    if data.get(f"{prefix}_{m}"):
+                        parts.append(f"{name} = {data.get(f'{prefix}_{m}')}")
+                if parts:
+                    lines.append(f"  {label}: " + ", ".join(parts) + extra)
+            
+            _dop_line("Umbilical Artery", "umbilical",
+                      f" (Percentile: {data.get('umbilical_pct')}%)" if data.get("umbilical_pct") else "")
+            _has_l = any(data.get(f"uterine_left_{m}") for m in ("pi", "ri", "sd"))
+            _has_r = any(data.get(f"uterine_right_{m}") for m in ("pi", "ri", "sd"))
+            _notch = data.get("uterine_notching", "No notching")
+            _upct = f", Percentile: {data.get('uterine_pct')}%" if data.get("uterine_pct") else ""
+            if _has_l and _has_r:
+                _dop_line("Lt. Uterine Artery", "uterine_left")
+                _dop_line("Rt. Uterine Artery", "uterine_right")
+                _dop_line("Uterine Artery (Mean)", "uterine", f" ({_notch}{_upct})")
+            elif _has_l:
+                _dop_line("Lt. Uterine Artery", "uterine_left", f" ({_notch}{_upct})")
+            elif _has_r:
+                _dop_line("Rt. Uterine Artery", "uterine_right", f" ({_notch}{_upct})")
+            else:
+                _dop_line("Uterine Artery", "uterine", f" ({_notch}{_upct})")
+            _dop_line("MCA", "mca")
 
     lines.append(""); lines.append("IMPRESSION:")
     mean_age = data.get('mean_age', '')
@@ -1143,22 +1164,9 @@ def render_ob_preview(data, template_id):
     elif template_id == "NT_NB":
         imp_text = imp_map["NT_NB"]
     else:
-        pres_text = data.get('presentation', 'variable').lower()
-        lie_text = data.get('lie', 'None')
-        
-        lie_map = {
-            "LOA": "Left Occiputo-Anterior",
-            "ROA": "Right Occiputo-Anterior",
-            "LOP": "Left Occiputo-Posterior",
-            "ROP": "Right Occiputo-Posterior"
-        }
-        
-        if lie_text != "None":
-            pres_text = f"{pres_text.capitalize()} presentation & {lie_map.get(lie_text, lie_text)} lie"
-        else:
-            pres_text = f"{pres_text.capitalize()} presentation"
+        pres_text = presentation_text(data)
             
-        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text} of approx. {mean_age} gestation age."
+        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text}{',' if _is_lie_presentation(data) else ''} of approx. {mean_age} gestation age."
         
     lines.append(f"  - {imp_text}")
 
@@ -1226,6 +1234,12 @@ if os.path.exists(json_path):
 
 v = st.session_state.get("dicom_version", 0)
 sr_data = st.session_state.get("sr_data", {})
+
+# --- FIX FOR PLACENTA DROPDOWN CACHING ---
+if "placenta_pos_widget" not in st.session_state:
+    st.session_state["placenta_pos_widget"] = "Anterior"
+if "placenta_os_widget" not in st.session_state:
+    st.session_state["placenta_os_widget"] = "away from the Os"
 
 # --- THE ACTUAL NAME/AUTO-FILL FIX ---
 # We bypass the versioning and force the name/age directly into the widget keys.
@@ -1334,8 +1348,12 @@ with col1:
         if 'ga_lmp_days' in sr_data: 
             st.session_state[f"sr_ga_lmp_{v}"] = f"{sr_data['ga_lmp_days']//7}w{sr_data['ga_lmp_days']%7}d"
 
-        if 'umbilical_pi' in sr_data: st.session_state[f"sr_umbilical_pi_{v}"] = sr_data['umbilical_pi']
-        if 'uterine_pi' in sr_data: st.session_state[f"sr_uterine_pi_{v}"] = sr_data['uterine_pi']
+        # Doppler: PI / RI / S/D for each vessel (uterine has left, right and mean)
+        for _vsl in ["umbilical", "uterine", "uterine_left", "uterine_right", "mca"]:
+            for _m in ["pi", "ri", "sd"]:
+                _k = f"{_vsl}_{_m}"
+                if _k in sr_data:
+                    st.session_state[f"sr_{_k}_{v}"] = sr_data[_k]
         
         st.session_state["last_applied_version"] = v
 
@@ -1343,8 +1361,10 @@ with col1:
     lmp_not_sure = st.checkbox("LMP Not Sure / Not Known")
     if lmp_not_sure:
         data["lmp"] = "Not Sure"
+        data["ga_lmp"] = ""
     else:
         data["lmp"] = st.text_input("LMP", value=st.session_state.get(f"sr_lmp_{v}", ""))
+        data["ga_lmp"] = st.text_input("GA by LMP", value=st.session_state.get(f"sr_ga_lmp_{v}", ""), key=f"ga_lmp_input_{v}")
 
     with st.expander("🔗 DICOM SR Data (Machine Generated)", expanded=False):
         st.markdown('<div class="dicom-box">Verify or override data received from the ultrasound machine.</div>', unsafe_allow_html=True)
@@ -1466,39 +1486,59 @@ with col1:
             data["edd_lmp"] = b2.text_input("EDD (LMP)", value=st.session_state.get(f"sr_edd_lmp_{v}", ""), key=f"sr_edd_lmp_{v}")
             data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get(f"sr_edd_cua_{v}", ""), key=f"sr_edd_cua_{v}")
             
-            # --- DOPPLER CALCULATIONS ---
-            # 1. Calculate Mean Uterine PI
-            ut_pi_left = st.session_state.get(f"sr_uterine_pi_{v}", "")
-            ut_pi_right = st.session_state.get(f"sr_uterine_pi_right_{v}", "")
-            
-            mean_ut_pi = ut_pi_left
-            if ut_pi_left and ut_pi_right:
-                try:
-                    mean_val = (float(ut_pi_left) + float(ut_pi_right)) / 2.0
-                    mean_ut_pi = f"{mean_val:.2f}"
-                except:
-                    pass
-                    
-            # 2. Check if MCA is present in DICOM
-            mca_present = 'mca_pi' in sr_data
-            mca_val = sr_data.get('mca_pi', "")
+            # --- DOPPLER INPUTS ---
+            def _mean_of(*vals):
+                nums = []
+                for x in vals:
+                    try: nums.append(float(x))
+                    except (TypeError, ValueError): pass
+                return f"{sum(nums)/len(nums):.2f}" if nums else ""
 
             st.markdown("**Doppler Indices & Percentiles**")
-            
+
+            st.caption("Umbilical Artery")
+            c1, c2, c3 = st.columns(3)
+            data["umbilical_pi"] = c1.text_input("UA PI", key=f"sr_umbilical_pi_{v}")
+            data["umbilical_ri"] = c2.text_input("UA RI", key=f"sr_umbilical_ri_{v}")
+            data["umbilical_sd"] = c3.text_input("UA S/D", key=f"sr_umbilical_sd_{v}")
+
+            st.caption("Uterine Arteries")
+            c1, c2, c3 = st.columns(3)
+            data["uterine_left_pi"] = c1.text_input("Left PI", key=f"sr_uterine_left_pi_{v}")
+            data["uterine_left_ri"] = c2.text_input("Left RI", key=f"sr_uterine_left_ri_{v}")
+            data["uterine_left_sd"] = c3.text_input("Left S/D", key=f"sr_uterine_left_sd_{v}")
+            c1, c2, c3 = st.columns(3)
+            data["uterine_right_pi"] = c1.text_input("Right PI", key=f"sr_uterine_right_pi_{v}")
+            data["uterine_right_ri"] = c2.text_input("Right RI", key=f"sr_uterine_right_ri_{v}")
+            data["uterine_right_sd"] = c3.text_input("Right S/D", key=f"sr_uterine_right_sd_{v}")
+
+            # Mean = average of Left/Right as typed; falls back to the SR's own unsided value.
+            # The mean is part of the widget key so it refreshes when Left/Right change.
+            mean_pi = _mean_of(data["uterine_left_pi"], data["uterine_right_pi"]) or sr_data.get("uterine_pi", "")
+            mean_ri = _mean_of(data["uterine_left_ri"], data["uterine_right_ri"]) or sr_data.get("uterine_ri", "")
+            mean_sd = _mean_of(data["uterine_left_sd"], data["uterine_right_sd"]) or sr_data.get("uterine_sd", "")
+            c1, c2, c3 = st.columns(3)
+            data["uterine_pi"] = c1.text_input("Mean Uterine PI", value=mean_pi, key=f"sr_uterine_pi_mean_{v}_{mean_pi}")
+            data["uterine_ri"] = c2.text_input("Mean Uterine RI", value=mean_ri, key=f"sr_uterine_ri_mean_{v}_{mean_ri}")
+            data["uterine_sd"] = c3.text_input("Mean Uterine S/D", value=mean_sd, key=f"sr_uterine_sd_mean_{v}_{mean_sd}")
+
+            # MCA only appears when the SR contains it
+            mca_present = any(k in sr_data for k in ("mca_pi", "mca_ri", "mca_sd"))
             if mca_present:
-                b1, b2, b3 = st.columns(3)
-                data["umbilical_pi"] = b1.text_input("Umbilical PI", value=st.session_state.get(f"sr_umbilical_pi_{v}", ""), key=f"sr_umbilical_pi_{v}")
-                data["uterine_pi"] = b2.text_input("Mean Uterine PI", value=mean_ut_pi, key=f"sr_uterine_pi_mean_{v}")
-                data["mca_pi"] = b3.text_input("MCA PI", value=mca_val, key=f"sr_mca_pi_{v}")
+                st.caption("Middle Cerebral Artery")
+                c1, c2, c3 = st.columns(3)
+                data["mca_pi"] = c1.text_input("MCA PI", key=f"sr_mca_pi_{v}")
+                data["mca_ri"] = c2.text_input("MCA RI", key=f"sr_mca_ri_{v}")
+                data["mca_sd"] = c3.text_input("MCA S/D", key=f"sr_mca_sd_{v}")
             else:
-                b1, b2 = st.columns(2)
-                data["umbilical_pi"] = b1.text_input("Umbilical PI", value=st.session_state.get(f"sr_umbilical_pi_{v}", ""), key=f"sr_umbilical_pi_{v}")
-                data["uterine_pi"] = b2.text_input("Mean Uterine PI", value=mean_ut_pi, key=f"sr_uterine_pi_mean_{v}")
-                data["mca_pi"] = "" # Ensure it stays blank if not present
+                data["mca_pi"] = data["mca_ri"] = data["mca_sd"] = ""  # stays blank if not present
             
             data["uterine_notching"] = st.selectbox("Uterine Artery Notching", ["No notching", "Unilateral Notching", "Bilateral Notching"])
 
-            data["ga_weeks_dop"] = st.number_input("GA (weeks) for Percentiles", min_value=10.0, max_value=42.0, value=28.0, step=0.1)
+            # Default GA for percentiles = ultrasound GA from the SR (falls back to LMP GA, then 28 w)
+            _ga_days_sr = sr_data.get("ga_usg_days") or sr_data.get("ga_lmp_days")
+            _ga_default = round(min(max(_ga_days_sr / 7.0, 10.0), 42.0), 1) if _ga_days_sr else 28.0
+            data["ga_weeks_dop"] = st.number_input("GA (weeks) for Percentiles", min_value=10.0, max_value=42.0, value=_ga_default, step=0.1)
 
             b1, b2, b3 = st.columns(3)
             if data.get("umbilical_pi"):
@@ -1541,14 +1581,24 @@ with col1:
             data["dv_awave"] = st.selectbox("DV A-Wave", ["Positive", "Absent", "Reversed"])
             
             b1, b2 = st.columns(2)
-            data["placenta_pos"] = b1.selectbox("Placenta Position", ["ANTERIOR", "POSTERIOR", "FUNDAL", "LOW-LYING"])
-            data["cervix"] = b2.text_input("Cervix Length", value="")
+            _plac_opts = PLACENTA_OPTS
+            # The key forces Streamlit to refresh the widget
+            data["placenta_pos"] = b1.selectbox("Placenta Position", _plac_opts, key="placenta_pos_widget")
+            data["placenta_os"] = b2.selectbox("Placenta Relation to Os", ["away from the Os", "Low-lying", "Placenta Praevia"], key="placenta_os_widget")
 
     else:
         with st.expander("Anatomy & Presentation", expanded=True):
             b1, b2 = st.columns(2)
-            data["presentation"] = b1.selectbox("Presentation", ["VARIABLE", "CEPHALIC", "BREECH"])
-            data["lie"] = b2.selectbox("Lie", ["None", "LOA", "ROA", "LOP", "ROP"])
+            data["presentation"] = b1.selectbox("Presentation", PRESENTATION_OPTIONS)
+            if data["presentation"] == "CEPHALIC":
+                data["lie"] = b2.selectbox("Lie", LIE_OPTIONS, format_func=lambda c: LIE_LABELS.get(c, c), key="lie_widget")
+            else:
+                b2.selectbox("Lie", ["None"], disabled=True, key="lie_widget_disabled")  # lie options only apply to cephalic
+                data["lie"] = "None"
+            if data["presentation"] in ("OBLIQUE LIE", "TRANSVERSE LIE"):
+                q1, q2 = st.columns(2)
+                data["head_side"] = q1.selectbox("Head in - Side", ["Right", "Left"], key="head_side_widget")
+                data["head_level"] = q2.selectbox("Head in - Quadrant", ["Upper", "Lower"], key="head_level_widget")
 
             data["afi_method"] = st.radio("AFI Method", ["Largest Pocket", "Total 4 Quadrants"], horizontal=True)
             if data["afi_method"] == "Total 4 Quadrants":
@@ -1557,7 +1607,7 @@ with col1:
                 data["afi_pocket"] = st.text_input("Largest Pocket (cm)")
 
             b1, b2 = st.columns(2)
-            data["placenta_pos"] = b1.selectbox("Placenta Position", ["ANTERIOR", "POSTERIOR", "FUNDAL", "LOW-LYING"])
+            data["placenta_pos"] = b1.selectbox("Placenta Position", PLACENTA_OPTS)
             data["placenta_os"] = b2.selectbox("Placenta Relation to Os", ["away from the Os", "Low-lying", "Placenta Praevia"])
 
             if data["placenta_os"] == "Low-lying":
@@ -1566,7 +1616,7 @@ with col1:
                 data["praevia_grade"] = st.radio("Praevia Grade", ["Grade I", "Grade II", "Grade III", "Grade IV"], horizontal=True)
 
             b1, b2 = st.columns(2)
-            data["cervix"] = b1.text_input("Cervix Length")
+            data["cervix"] = b1.text_input("Cervix Length (cm)")
             data["internal_os"] = b2.selectbox("Internal Os", ["Closed", "Open"])
 
             st.markdown("**Cord Loop**")
