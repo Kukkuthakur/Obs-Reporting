@@ -15,6 +15,53 @@ import pydicom
 import matplotlib.pyplot as plt
 import numpy as np
 
+def add_inline_bar(paragraph, img_buf, width_cm=3.0, text_pt=11):
+    """Insert the percentile bar inline and drop it so the bar sits on the text's mid-line.
+    A picture normally rests on the text baseline, which makes the bar float above the words."""
+    import struct
+    img_buf.seek(0)
+    w_px, h_px = struct.unpack('>II', img_buf.read(24)[16:24])  # PNG header: width, height
+    img_buf.seek(0)
+    run = paragraph.add_run()
+    run.add_picture(img_buf, width=Cm(width_cm))
+    height_pt = width_cm * 28.346 * h_px / w_px
+    lower_pt = max(0.0, height_pt / 2 - 0.35 * text_pt)   # bar centre -> centre of the text line
+    pos = OxmlElement('w:position')
+    pos.set(qn('w:val'), str(-int(round(lower_pt * 2))))  # value is in half-points
+    run._r.get_or_add_rPr().append(pos)
+    return run
+
+def generate_percentile_bar_inline(percentile):
+    """Slim percentile bar for use INSIDE a line of text (e.g. the EFW line).
+    The picture is only as tall as the bar itself and the bar sits at its exact centre, so the
+    bar lines up with the middle of the text instead of floating above the line."""
+    if not percentile:
+        return None
+    try:
+        pct = float(percentile)
+    except:
+        return None
+
+    fig = plt.figure(figsize=(3, 0.28))
+    fig.patch.set_alpha(0)
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.patch.set_alpha(0)
+    for a, b, col in [(0, 5, '#D32F2F'), (5, 10, '#FFC107'), (10, 90, '#4CAF50'), (90, 95, '#FFC107'), (95, 100, '#D32F2F')]:
+        ax.plot([a, b], [0, 0], color=col, linewidth=6, zorder=1, solid_capstyle='butt')
+    dot_color = '#000000' if 10 <= pct <= 90 else '#D32F2F'
+    ax.scatter(min(max(pct, 0), 100), 0, color=dot_color, s=60, zorder=3, edgecolors='white', linewidths=1.5)
+    for x in (10, 90):
+        ax.plot([x, x], [-0.6, 0.6], color='black', linewidth=1, zorder=2)
+    ax.set_xlim(-2, 102)
+    ax.set_ylim(-1, 1)
+    ax.axis('off')
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", transparent=True, dpi=250)  # fixed size: no cropping, bar stays centred
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
 def generate_percentile_bar(percentile):
     """Generates a color-coded PNG image of a percentile bar."""
     if not percentile:
@@ -77,34 +124,41 @@ def _z_to_percentile(z: float) -> float:
     cdf = 0.5 * (1.0 + sign * erf)
     return cdf * 100.0
 
-def calculate_ua_pi(pi: float, ga_weeks: float):
-    ga = _ga_days(ga_weeks)
-    median = -0.0016 * ga + 1.2876
-    sd = 10 ** (-0.0012 * ga + 0.1147)
-    z = (pi - median) / sd if sd else 0
-    return {"z_score": round(z, 2), "percentile": round(_z_to_percentile(z), 1)}
+def _pct_result(z: float):
+    """z-score -> percentile (kept inside 0.1-99.9 so the report never shows 0.0 or 100.0)."""
+    pct = min(max(_z_to_percentile(z), 0.1), 99.9)
+    return {"z_score": round(z, 2), "percentile": round(pct, 1)}
 
-def calculate_uta_pi(pi: float, ga_weeks: int):
-    UTA_PI_REF = {
-        11: (1.18, 1.79, 2.70), 12: (1.11, 1.68, 2.53), 13: (1.05, 1.58, 2.38),
-        14: (0.99, 1.49, 2.24), 15: (0.94, 1.41, 2.11), 16: (0.89, 1.33, 1.99),
-        17: (0.85, 1.27, 1.88), 18: (0.81, 1.20, 1.79), 19: (0.78, 1.15, 1.70),
-        20: (0.74, 1.10, 1.61), 21: (0.71, 1.05, 1.54), 22: (0.69, 1.00, 1.47),
-        23: (0.66, 0.96, 1.41), 24: (0.64, 0.93, 1.35), 25: (0.62, 0.89, 1.30),
-        26: (0.60, 0.86, 1.25), 27: (0.58, 0.84, 1.21), 28: (0.56, 0.81, 1.17),
-        29: (0.55, 0.79, 1.13), 30: (0.54, 0.77, 1.10), 31: (0.52, 0.75, 1.06),
-        32: (0.51, 0.73, 1.04), 33: (0.50, 0.71, 1.01), 34: (0.50, 0.70, 0.99),
-        35: (0.49, 0.69, 0.97), 36: (0.48, 0.68, 0.95), 37: (0.48, 0.67, 0.94),
-        38: (0.47, 0.66, 0.92), 39: (0.47, 0.65, 0.91), 40: (0.47, 0.65, 0.90),
-        41: (0.47, 0.65, 0.89)
-    }
-    if ga_weeks not in UTA_PI_REF: return None
-    p5, p50, p95 = UTA_PI_REF[ga_weeks]
-    if pi <= p5: pct = 5.0
-    elif pi >= p95: pct = 95.0
-    elif pi <= p50: pct = 5.0 + 45.0 * (pi - p5) / (p50 - p5)
-    else: pct = 50.0 + 45.0 * (pi - p50) / (p95 - p50)
-    return {"z_score": 0.0, "percentile": round(pct, 1)}
+def calculate_ua_pi(pi: float, ga_weeks: float):
+    """Umbilical artery PI percentile, matched to the Barcelona Doppler calculator.
+    Fitted to 8 Barcelona readings (20/26/32/38 wk, two PIs each) and confirmed at 3 off-grid checks:
+    mean PI is quadratic in GA (weeks), SD constant ~0.30. Valid ~18-42 weeks."""
+    if ga_weeks < 18 or ga_weeks > 42:
+        return None
+    mean = 3.587744 - 0.137978 * ga_weeks + 0.0017778 * ga_weeks ** 2
+    sd = 0.299
+    return _pct_result((pi - mean) / sd)
+
+def calculate_mca_pi(pi: float, ga_weeks: float):
+    """MCA PI percentile, matched to the Barcelona Doppler calculator.
+    Fitted to 17 Barcelona readings (max difference 0.4 percentile points) and confirmed at
+    4 off-grid checks: mean PI and SD are both quadratic in GA (weeks). Fitted 20-41 weeks; valid ~19-42."""
+    if ga_weeks < 19 or ga_weeks > 42:
+        return None
+    mean = -0.005827 * ga_weeks ** 2 + 0.335068 * ga_weeks - 2.754777
+    sd = -0.001350 * ga_weeks ** 2 + 0.082878 * ga_weeks - 0.893367
+    return _pct_result((pi - mean) / sd)
+
+def calculate_uta_pi(pi: float, ga_weeks: float):
+    """Mean uterine artery PI (average of right and left) percentile, fitted to the Barcelona calculator.
+    Fitted to 20 Barcelona readings: log-normal, median and spread both quadratic in GA (weeks).
+    17 of 20 readings within 1 percentile point; worst 3.5 points near the median at 34-36 weeks.
+    Validated 20-41 weeks; below 20 weeks it is extrapolated (unchecked). Valid ~16-42 weeks."""
+    if pi <= 0 or ga_weeks < 16 or ga_weeks > 42:
+        return None
+    ln_median = 8.68354e-4 * ga_weeks ** 2 - 7.75178e-2 * ga_weeks + 1.29545
+    sdlog = 3.50871e-5 * ga_weeks ** 2 - 3.69546e-3 * ga_weeks + 0.297911
+    return _pct_result((math.log(pi) - ln_median) / sdlog)
 
 # ============================================================
 # DICOM SR PARSER
@@ -328,16 +382,48 @@ def set_cell_background(cell, hex_color):
     shd.set(qn('w:fill'), hex_color)
     tcPr.append(shd)
 
+# Table colour themes (header, row 1, row 2): light shades to conserve ink. One per report, rotating.
+COLOR_THEMES = [
+    ("Green",  "A5D6A7", "E8F5E9", "D3EAD5"),
+    ("Blue",   "BBDEFB", "E3F2FD", "D0E7FA"),
+    ("Pink",   "F8BBD0", "FCE4EC", "F9D5E3"),
+    ("Yellow", "FFF59D", "FFFDE7", "FFF9C4"),
+]
+ACTIVE_THEME = 0
+COLOR_STATE_FILE = "report_color_state.json"   # sits next to app.py; remembers which colour is next
+
+def _color_state_path():
+    import os
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), COLOR_STATE_FILE)
+
+def load_color_index():
+    """Colour theme to use for the current report (survives app restarts)."""
+    import json
+    try:
+        with open(_color_state_path()) as f:
+            return int(json.load(f).get("index", 0)) % len(COLOR_THEMES)
+    except Exception:
+        return 0
+
+def advance_color_index():
+    """Called when a report is downloaded: the next report gets the next colour."""
+    import json
+    try:
+        next_index = (load_color_index() + 1) % len(COLOR_THEMES)   # read BEFORE the file is reopened for writing
+        with open(_color_state_path(), "w") as f:
+            json.dump({"index": next_index}, f)
+    except Exception:
+        pass
+
 def get_gradient_color(row_index, total_rows=6):
-    """Returns a light green alternating gradient hex code."""
-    # Base light green is E8F5E9. Darker is C8E6C9.
-    # We alternate to keep it readable like the reference image.
+    """Alternating table shading from the active colour theme."""
+    _, header, row1, row2 = COLOR_THEMES[ACTIVE_THEME % len(COLOR_THEMES)]
     if row_index == 0:
-        return "A5D6A7" # Header: Darker Green
+        return header      # Header: darker shade
     elif row_index % 2 == 1:
-        return "E8F5E9" # Row 1: Lighter
+        return row1        # Row 1: lighter
     else:
-        return "D3EAD5" # Row 2: Slightly darker
+        return row2        # Row 2: slightly darker
 
 def generate_afi_text(afi_val, is_total=True):
     try:
@@ -368,7 +454,9 @@ LIE_LABELS = {
     "LOL": "Left Occiputo-Lateral", "ROL": "Right Occiputo-Lateral",
 }
 
-PRESENTATION_OPTIONS = ["CEPHALIC", "BREECH", "OBLIQUE LIE", "TRANSVERSE LIE"]
+PRESENTATION_OPTIONS = ["CEPHALIC", "BREECH", "OBLIQUE LIE", "TRANSVERSE LIE", "VARIABLE"]
+# Default presentation per template (can always be changed in the dropdown)
+PRESENTATION_DEFAULTS = {"T3": "CEPHALIC", "T16": "VARIABLE"}
 
 def _is_lie_presentation(data):
     return str(data.get('presentation', '') or '').upper() in ("OBLIQUE LIE", "TRANSVERSE LIE")
@@ -492,6 +580,8 @@ def generate_doppler_text(data):
     return "\n".join(doppler_lines)
 
 def build_docx_bytes(data, template_id):
+    global ACTIVE_THEME
+    ACTIVE_THEME = int(data.get("color_theme", 0)) % len(COLOR_THEMES)
     doc = Document()
     section = doc.sections[0]
     section.page_height = Cm(29.7)
@@ -765,10 +855,10 @@ def build_docx_bytes(data, template_id):
         add_run(p, fw_str, italic=True)
         if data.get("fetal_weight_pct"):
             p.add_run("  (Percentile: ")
-            p.add_run(f"{data.get('fetal_weight_pct')}%)")
-            bar_img_efw = generate_percentile_bar(data.get("fetal_weight_pct"))
+            p.add_run(f"{data.get('fetal_weight_pct')}%)  ")
+            bar_img_efw = generate_percentile_bar_inline(data.get("fetal_weight_pct"))
             if bar_img_efw:
-                p.add_run().add_picture(bar_img_efw, width=Cm(3.0))
+                add_inline_bar(p, bar_img_efw, width_cm=3.0)
 
         p = doc.add_paragraph()
         add_run(p, "AFI:- ", bold=True)
@@ -1144,7 +1234,7 @@ def render_ob_preview(data, template_id):
                 _dop_line("Rt. Uterine Artery", "uterine_right", f" ({_notch}{_upct})")
             else:
                 _dop_line("Uterine Artery", "uterine", f" ({_notch}{_upct})")
-            _dop_line("MCA", "mca")
+            _dop_line("MCA", "mca", f" (Percentile: {data.get('mca_pct')}%)" if data.get("mca_pct") else "")
 
     lines.append(""); lines.append("IMPRESSION:")
     mean_age = data.get('mean_age', '')
@@ -1552,12 +1642,22 @@ with col1:
                 
             if data.get("uterine_pi"):
                 try:
-                    res = calculate_uta_pi(float(data["uterine_pi"]), int(round(data["ga_weeks_dop"])))
+                    res = calculate_uta_pi(float(data["uterine_pi"]), data["ga_weeks_dop"])
                     if res: 
                         data["uterine_pct"] = str(res['percentile'])
                         b2.caption(f"Uterine: {res['percentile']}th")
                         bar_uta = generate_percentile_bar(res['percentile'])
                         if bar_uta: b2.image(bar_uta, use_container_width=True)
+                except: pass
+
+            if data.get("mca_pi"):
+                try:
+                    res = calculate_mca_pi(float(data["mca_pi"]), data["ga_weeks_dop"])
+                    if res:
+                        data["mca_pct"] = str(res['percentile'])
+                        b3.caption(f"MCA: {res['percentile']}th")
+                        bar_mca = generate_percentile_bar(res['percentile'])
+                        if bar_mca: b3.image(bar_mca, use_container_width=True)
                 except: pass
 
     if template_id == "EARLY_OBS":
@@ -1589,7 +1689,9 @@ with col1:
     else:
         with st.expander("Anatomy & Presentation", expanded=True):
             b1, b2 = st.columns(2)
-            data["presentation"] = b1.selectbox("Presentation", PRESENTATION_OPTIONS)
+            _pres_default = PRESENTATION_OPTIONS.index(PRESENTATION_DEFAULTS.get(template_id, "CEPHALIC"))
+            data["presentation"] = b1.selectbox("Presentation", PRESENTATION_OPTIONS, index=_pres_default,
+                                                key=f"presentation_widget_{template_id}")
             if data["presentation"] == "CEPHALIC":
                 data["lie"] = b2.selectbox("Lie", LIE_OPTIONS, format_func=lambda c: LIE_LABELS.get(c, c), key="lie_widget")
             else:
@@ -1636,6 +1738,8 @@ with col2:
     st.markdown(f'<div class="preview-box">{_safe}</div>', unsafe_allow_html=True)
 
     st.subheader("⬇️ Download Report")
+    _color_idx = load_color_index()
+    data["color_theme"] = _color_idx
     docx_bytes = build_docx_bytes(data, template_id)
     
     # Generate a unique filename: PatientName_GA_DateTime
@@ -1652,5 +1756,8 @@ with col2:
         label="Download Word Document",
         data=docx_bytes,
         file_name=_filename,
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        on_click=advance_color_index   # next report gets the next table colour
     )
+    st.caption(f"Table colour for this report: {COLOR_THEMES[_color_idx][0]} "
+               f"(next report: {COLOR_THEMES[(_color_idx + 1) % len(COLOR_THEMES)][0]})")
