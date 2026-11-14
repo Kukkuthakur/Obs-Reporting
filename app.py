@@ -7,6 +7,7 @@ from datetime import datetime
 
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor, Emu
+from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
@@ -215,6 +216,105 @@ def calculate_uta_pi(pi: float, ga_weeks: float):
 # DICOM SR PARSER
 # ============================================================
 # --- BIOMETRY / ANOMALY-SCAN MEASUREMENTS ---
+# ============================================================
+# FIRST-TRIMESTER SCORING (CRL 45-84 mm): NT, mean uterine artery PI, ductus venosus PI
+# ============================================================
+from statistics import NormalDist
+_ND = NormalDist()
+FT_CRL_MIN, FT_CRL_MAX = 45.0, 84.0
+
+def _ft_pct(z):
+    return round(min(max(_ND.cdf(z) * 100, 0.1), 99.9), 1)
+
+def _ft_crl(crl):
+    """CRL in mm as a float, or None when it is missing / outside the 45-84 mm window the references cover."""
+    try:
+        c = float(str(crl).lower().replace("mm", "").strip())
+    except (TypeError, ValueError):
+        return None
+    return c if FT_CRL_MIN <= c <= FT_CRL_MAX else None
+
+def _ft_interp(rows, crl):
+    """rows = [(crl, v1, v2, ...)] sorted by CRL -> values interpolated linearly at this CRL."""
+    for a, b in zip(rows, rows[1:]):
+        if a[0] <= crl <= b[0]:
+            t = (crl - a[0]) / (b[0] - a[0])
+            return [x + (y - x) * t for x, y in zip(a[1:], b[1:])]
+    return list(rows[-1][1:])
+
+# NT: expected (median) NT = 0.437 + 0.01969 x CRL, spread SD = 0.56 mm.
+# Fitted to the readings of the Perinatology.com CRL & NT calculator (matches all but one keyed reading to +/-1 percentile).
+NT_SD_MM = 0.56
+def nt_expected(crl):
+    return 0.437 + 0.01969 * crl
+
+def calculate_nt_pct(nt, crl):
+    """-> {'pct', 'expected'} or None when NT is missing or the CRL is outside 45-84 mm."""
+    c = _ft_crl(crl)
+    try:
+        v = float(str(nt).lower().replace("mm", "").strip())
+    except (TypeError, ValueError):
+        return None
+    if c is None or v <= 0:
+        return None
+    exp = nt_expected(c)
+    return {"pct": _ft_pct((v - exp) / NT_SD_MM), "expected": exp}
+
+# Mean uterine artery PI at 11-14 weeks by CRL: Niu et al., Quant Imaging Med Surg 2023;13:8587 (Table 2 natural, Table 3 IVF).
+# Columns: CRL, P5, P10, P25, P50, P75, P90, P95 (linear between the CRLs listed).
+_UTA_LEVELS = (5, 10, 25, 50, 75, 90, 95)
+_UTA_REF = {
+    "Natural": [(45, 1.25, 1.39, 1.62, 1.91, 2.23, 2.54, 2.74), (50, 1.22, 1.34, 1.57, 1.86, 2.16, 2.46, 2.66),
+                (55, 1.18, 1.30, 1.53, 1.80, 2.10, 2.39, 2.58), (60, 1.14, 1.26, 1.48, 1.74, 2.03, 2.32, 2.50),
+                (65, 1.11, 1.22, 1.43, 1.69, 1.97, 2.24, 2.42), (70, 1.07, 1.18, 1.38, 1.63, 1.90, 2.17, 2.33),
+                (75, 1.03, 1.14, 1.34, 1.57, 1.84, 2.09, 2.25), (80, 1.00, 1.10, 1.29, 1.52, 1.77, 2.02, 2.17),
+                (84, 0.97, 1.07, 1.25, 1.47, 1.72, 1.95, 2.11)],
+    "IVF":     [(45, 1.01, 1.16, 1.43, 1.73, 2.04, 2.33, 2.50), (50, 0.98, 1.13, 1.38, 1.68, 1.98, 2.26, 2.43),
+                (55, 0.95, 1.09, 1.34, 1.63, 1.92, 2.19, 2.36), (60, 0.92, 1.06, 1.30, 1.58, 1.86, 2.13, 2.29),
+                (65, 0.89, 1.03, 1.26, 1.53, 1.80, 2.06, 2.21), (70, 0.86, 0.99, 1.22, 1.48, 1.74, 1.99, 2.14),
+                (75, 0.83, 0.96, 1.18, 1.43, 1.69, 1.92, 2.07), (80, 0.81, 0.93, 1.14, 1.38, 1.63, 1.85, 1.99),
+                (84, 0.78, 0.90, 1.11, 1.34, 1.58, 1.80, 1.94)],
+}
+
+def calculate_ft_uta_pi(pi, crl, conception="Natural"):
+    """-> {'pct', 'p5', 'p95'} or None. Percentile = position between the published P5..P95 curves (z-scale), extended at the ends."""
+    c = _ft_crl(crl)
+    try:
+        v = float(str(pi).strip())
+    except (TypeError, ValueError):
+        return None
+    if c is None or v <= 0:
+        return None
+    curve = _ft_interp(_UTA_REF["IVF" if str(conception).upper() == "IVF" else "Natural"], c)
+    zs = [_ND.inv_cdf(l / 100) for l in _UTA_LEVELS]
+    if v <= curve[0]:
+        i = 0
+    elif v >= curve[-1]:
+        i = len(curve) - 2
+    else:
+        i = next(k for k in range(len(curve) - 1) if curve[k] <= v <= curve[k + 1])
+    t = (v - curve[i]) / (curve[i + 1] - curve[i])
+    z = zs[i] + (zs[i + 1] - zs[i]) * t
+    return {"pct": _ft_pct(z), "p5": curve[0], "p95": curve[-1]}
+
+# Ductus venosus PI at 11-14 weeks by CRL: Li et al., PLoS One 2024;19:e0312874 (Table 1): P5 and P95 per CRL.
+# Mean = (P5+P95)/2 and SD = (P95-P5)/(2 x 1.6449), as the paper derives them.
+_DV_REF = [(45, 1.0007, 1.3415), (50, 0.9790, 1.3349), (55, 0.9617, 1.3258), (60, 0.9496, 1.3140), (65, 0.9432, 1.2993),
+           (70, 0.9430, 1.2815), (75, 0.9488, 1.2602), (81, 0.9633, 1.2294), (84, 0.9734, 1.2115)]
+
+def calculate_ft_dv_pi(pi, crl):
+    """-> {'pct', 'p5', 'p95'} or None."""
+    c = _ft_crl(crl)
+    try:
+        v = float(str(pi).strip())
+    except (TypeError, ValueError):
+        return None
+    if c is None or v <= 0:
+        return None
+    p5, p95 = _ft_interp(_DV_REF, c)
+    mean, sd = (p5 + p95) / 2, (p95 - p5) / (2 * 1.6449)
+    return {"pct": _ft_pct((v - mean) / sd), "p5": p5, "p95": p95}
+
 # SR concept name (lower-case) -> (key in latest_sr.json, keep one decimal in mm?)
 # The key feeds <key> (size, mm), <key>_wks / <key>_dys (GA) and <key>_pct (percentile).
 SR_BIOMETRY_KEYS = {
@@ -227,6 +327,8 @@ SR_BIOMETRY_KEYS = {
     'anterior horn lateral ventricular width': ('lv', True), 'lateral ventricle': ('lv', True),
     'cisterna magna length': ('cm', True), 'cisterna magna': ('cm', True),
     'nuchal fold thickness': ('nf', True), 'nuchal fold': ('nf', True),
+    'crown rump length': ('crl', False),   # -> crl_wks / crl_dys / crl_pct (GA and percentile of the CRL)
+    'nasal bone': ('nb', True),            # -> nb_pct (the machine's own nasal-bone percentile)
 }
 # sizes that are NOT handled by the original centimetre block
 SR_EXTRA_SIZE_KEYS = {'radius', 'ulna', 'tibia', 'fibula', 'tcd', 'lv', 'cm', 'nf'}
@@ -296,6 +398,15 @@ def extract_sr_data(ds):
                 if concept == 'EDD from LMP': extracted['edd_lmp'] = val
                 if concept == 'LMP': extracted['lmp'] = val
 
+        # --- DATE VALUES (LMP and EDDs are DATE items on this machine) ---
+        if item.ValueType == 'DATE':
+            _raw = str(item.get('Date', '') or '').strip()
+            if re.fullmatch(r'\d{8}', _raw):
+                _dd = f"{_raw[6:8]}-{_raw[4:6]}-{_raw[0:4]}"
+                if concept == 'EDD from average ultrasound age': extracted['edd_cua'] = _dd
+                elif concept == 'EDD from LMP': extracted['edd_lmp'] = _dd
+                elif concept == 'LMP': extracted['lmp'] = _dd
+
         # --- NUMERIC VALUES ---
         if item.ValueType == 'NUM' and 'MeasuredValueSequence' in item:
             val_seq = item.MeasuredValueSequence[0]
@@ -310,8 +421,7 @@ def extract_sr_data(ds):
                 elif concept == 'Femur Length': extracted['fl'] = f"{int(num_val * 10)}"
                 elif concept == 'Humerus length': extracted['hl'] = f"{int(num_val * 10)}"
                 elif concept == 'Gestational Sac Diameter': extracted['msd'] = f"{int(num_val * 10)}"
-                elif concept == 'Crown Rump Length': extracted['crl'] = f"{int(num_val * 10)}"
-                elif concept == 'Nuchal Translucency': extracted['nt'] = f"{int(num_val * 10)}"
+                elif concept == 'Crown Rump Length': extracted['crl'] = f"{int(round(num_val * 10))}"
 
             # Anomaly-scan sizes: TCD, lateral ventricle, cisterna magna, nuchal fold, radius, ulna, tibia, fibula
             if _bk and _bk[0] in SR_EXTRA_SIZE_KEYS:
@@ -319,8 +429,17 @@ def extract_sr_data(ds):
                 if _mm is not None:
                     extracted[_bk[0]] = _mm
 
-            if concept == 'Nasal Bone':
+            # NT arrives in mm on some machines and cm on others; keep two decimals (1.27 mm)
+            if _sr_norm(concept) == 'nuchal translucency':
+                _ntmm = num_val * 10 if unit == 'centimeter' else num_val if unit == 'millimeter' else None
+                if _ntmm is not None:
+                    extracted['nt'] = f"{_ntmm:.2f}".rstrip('0').rstrip('.')
+            # Nasal bone: length (mm) and Present/Absent; the percentile comes from the sibling 'Growth Percentile Rank'
+            if _sr_norm(concept) == 'nasal bone':
                 extracted['nasal_bone'] = "Present" if num_val > 0 else "Absent"
+                _nbmm = _sr_size_mm(num_val, unit, True)
+                if _nbmm is not None:
+                    extracted['nb_len'] = _nbmm
             
             # Doppler (Umbilical / Uterine / MCA): PI, RI and S/D, with Left/Right for uterine
             if concept in ('Pulsatility Index', 'Resistivity Index', 'Systolic to Diastolic Velocity Ratio'):
@@ -385,8 +504,18 @@ def extract_sr_data(ds):
         if vals:
             extracted[f"uterine_{metric}"] = f"{sum(vals)/len(vals):.2f}"
 
-    # Date calculations
+    # Date calculations: counted from the scan date in the SR (falls back to today)
     today = datetime.now()
+    _sd = str(getattr(ds, 'StudyDate', '') or '').strip()
+    if re.fullmatch(r'\d{8}', _sd):
+        try:
+            today = datetime.strptime(_sd, "%Y%m%d")
+            extracted['study_date'] = today.strftime("%d-%b-%y")
+        except ValueError:
+            pass
+    _rp = str(getattr(ds, 'ReferringPhysicianName', '') or '').replace('^', ' ').strip()
+    if _rp:
+        extracted['referred_by'] = _rp
     if 'lmp' not in extracted and 'ga_lmp_days' in extracted:
         extracted['lmp'] = (today - timedelta(days=extracted['ga_lmp_days'])).strftime("%d-%m-%Y")
     if 'edd_lmp' not in extracted and 'ga_lmp_days' in extracted:
@@ -487,6 +616,13 @@ def normalize_table_props(doc):
         for k in kids:
             pr.append(k)
 
+def keep_row_together(table):
+    """Do not let a table row split across two pages (the PNDT box must never be cut in half)."""
+    for row in table.rows:
+        trPr = row._tr.get_or_add_trPr()
+        if trPr.find(qn('w:cantSplit')) is None:
+            trPr.append(OxmlElement('w:cantSplit'))
+
 def finish_document(doc):
     """Word needs a paragraph after a table that ends the document, and it makes one of normal height itself. When the
     last table ends near the page bottom that paragraph spills onto a blank page that cannot be deleted. Add our own,
@@ -519,6 +655,7 @@ COLOR_THEMES = [
 ]
 DISABLED_THEMES = {"Green"}      # kept in COLOR_THEMES but skipped by the rotation; remove the name here to switch it back on
 ROTATION = [i for i, t in enumerate(COLOR_THEMES) if t[0] not in DISABLED_THEMES]
+TEMPLATE_DISABLED_THEMES = {"NT_NB": {"Blue"}}   # colours a particular template never uses (the rotation is otherwise unchanged)
 ACTIVE_THEME = ROTATION[0]
 COLOR_DOPPLER = "COLOR_DOPPLER"                                   # dedicated Color Doppler template id
 PINK_THEME_INDEX = [t[0] for t in COLOR_THEMES].index("Pink")      # Color Doppler reports are always pink
@@ -546,11 +683,21 @@ def _next_enabled(idx):
             return j
     return ROTATION[0]
 
-def advance_color_index():
-    """Called when a report is downloaded: the next report gets the next colour."""
+def theme_for_template(template_id, idx):
+    """Colour a report of this template actually uses: the rotation colour, or the next allowed one if the
+    template does not use it (e.g. NT/NB never uses Blue)."""
+    blocked = TEMPLATE_DISABLED_THEMES.get(template_id, set())
+    for step in range(len(COLOR_THEMES) + 1):
+        j = (idx + step) % len(COLOR_THEMES)
+        if j in ROTATION and COLOR_THEMES[j][0] not in blocked:
+            return j
+    return idx
+
+def advance_color_index(used_idx=None):
+    """Called when a report is downloaded: the next report gets the colour after the one just used."""
     import json
     try:
-        next_index = _next_enabled(load_color_index())   # read BEFORE the file is reopened for writing
+        next_index = _next_enabled(load_color_index() if used_idx is None else used_idx)   # read BEFORE the file is reopened for writing
         with open(_color_state_path(), "w") as f:
             json.dump({"index": next_index}, f)
     except Exception:
@@ -580,6 +727,51 @@ def generate_afi_text(afi_val, is_total=True):
     elif 10 <= val <= 20: return "Adequate", False
     elif 20 < val < 25: return "On the higher side", True
     else: return "Polyhydramnios", True
+
+def oligo_impression_phrase(data):
+    """Impression fragment for abnormal liquor (oligo / nil / polyhydramnios), else ''.
+    Total 4 Quadrants: follows generate_afi_text bands (0 nil; <4 moderate to severe; 4-<6 mild to moderate;
+    6-<8 mild oligohydramnios; >=25 polyhydramnios).
+    Largest Pocket: <2 cm oligohydramnios; >8 cm polyhydramnios."""
+    method = data.get('afi_method', 'Total 4 Quadrants')
+    if method == "Total 4 Quadrants":
+        val = str(data.get('afi_total', '') or '').strip()
+        try:
+            f = float(val)
+        except ValueError:
+            return ""
+        desc, _ = generate_afi_text(val, is_total=True)
+        if f == 0:
+            return "anhydramnios, not a single pocket of even one cm seen"
+        if 0 < f < 8 and "oligohydramnios" in desc:
+            return f"{desc.lower()}, total of four quadrants measures {val} cm"
+        if desc == "Polyhydramnios":
+            return f"polyhydramnios, total of four quadrants measures {val} cm"
+        return ""
+    val = str(data.get('afi_pocket', '') or '').strip()
+    try:
+        f = float(val)
+    except ValueError:
+        return ""
+    if f == 0:
+        return "anhydramnios, not a single pocket of even one cm seen"
+    if 0 < f < 2.0:
+        return f"oligohydramnios, largest pocket measures {val} cm"
+    if f > 8.0:
+        return f"polyhydramnios, largest pocket measures {val} cm"
+    return ""
+
+def impression_with_clause(inline, data):
+    """' with ...' clause for the impression line: oligohydramnios first, then the other findings."""
+    oligo = oligo_impression_phrase(data)
+    inline = [i for i in inline if i]
+    if oligo and inline:
+        return " with " + oligo + ", and " + _join_and(inline)
+    if oligo:
+        return " with " + oligo
+    if inline:
+        return " with " + _join_and(inline)
+    return ""
 
 # ============================================================
 # DOCX BUILDER
@@ -619,6 +811,43 @@ def presentation_text(data):
         text += f" & {LIE_LABELS.get(lie, lie)} lie"
     return text
 
+def _mm_text(v):
+    s = str(v or "").strip().lower().replace("mm", "").strip()
+    return f"{s} mm" if s else ""
+
+def cpc_phrase(data):
+    """Choroid plexus cyst wording, e.g. 'a right choroid plexus cyst (5 mm)' / 'Bilateral choroid plexi cysts (5 mm & 4 mm)'."""
+    if not data.get("cpc"):
+        return ""
+    r, l = bool(data.get("cpc_right")), bool(data.get("cpc_left"))
+    rs, ls = _mm_text(data.get("cpc_right_size")), _mm_text(data.get("cpc_left_size"))
+    if r and l:
+        sizes = " & ".join(x for x in (rs, ls) if x)          # right first, then left
+        return "Bilateral choroid plexi cysts" + (f" ({sizes})" if sizes else "")
+    if r or l:
+        size = rs if r else ls
+        return f"a {'right' if r else 'left'} choroid plexus cyst" + (f" ({size})" if size else "")
+    return ""
+
+def eif_phrase(data):
+    """Echogenic intracardiac focus wording."""
+    if not data.get("eif"):
+        return ""
+    r, l = bool(data.get("eif_right")), bool(data.get("eif_left"))
+    if r and l:
+        return "Echogenic intracardiac foci (EIF) in both Left & Right ventricles"
+    if r or l:
+        return f"an Echogenic intracardiac focus (EIF) in {'Right' if r else 'Left'} ventricle"
+    return ""
+
+def softmarker_notes(data):
+    """Report-body lines. Anomaly: replace 'No identifiable intracranial lesion seen.' / 'No evidence of SOL in the thorax.'
+    T16 / T3 / Color Doppler: extra last lines under the cord / scar line."""
+    return [f"Note is made of {ph}." for ph in (cpc_phrase(data), eif_phrase(data)) if ph]
+
+def softmarker_phrases(data):
+    return [ph for ph in (cpc_phrase(data), eif_phrase(data)) if ph]
+
 def scar_text(val):
     """Scar thickness with grading: >2 mm Adequate, =2.0 mm Borderline adequate, <2 mm Reduced."""
     s = str(val if val is not None else "").strip()
@@ -653,7 +882,7 @@ def _fmt_date(s):
 
 def _split_ga(s):
     """'22w1d' / '19weeks 5days ± 2w' -> (22, 1) / (19, 5); None if not parseable."""
-    m = re.search(r'(\d+)\s*w(?:eeks?)?\s*(?:(\d+)\s*d)?', str(s or '').lower())
+    m = re.search(r'(\d+)\s*w(?:eeks?|ks?)?\s*(?:(\d+)\s*d)?', str(s or '').lower())
     return (int(m.group(1)), int(m.group(2) or 0)) if m else None
 
 SMALLER_FETUS_MILD = "Fetus is smaller for alleged GA"
@@ -722,6 +951,176 @@ def dating_preview(data):
     for label, lmp, wk, dy, edd in rows:
         out.append(f"  {label:<9}{lmp:<20}{(wk + ' ' + dy):<20}{edd}")
     return out
+
+def nt_nb_summary(data):
+    """Everything the NT/NB report prints, worked out once: texts, percentiles and the abnormal findings for the opinion."""
+    S = {"flags": []}
+    ga = _split_ga(data.get('ga_crl')) or _split_ga(data.get('mean_age'))
+    S["ga_txt"] = f"{ga[0]}wks {ga[1]:02d}days" if ga else ""
+    crl = str(data.get('crl', '') or '').strip()
+    S["crl_line"] = (f"{crl} mm" + (f" - {S['ga_txt']}" if S["ga_txt"] else "")) if crl else S["ga_txt"]
+    fhr = str(data.get('fhr_val', '') or '').strip()
+    if data.get('cardiac_status', 'Present') == "Present":
+        S["cardiac"] = "Present" + (f", {fhr} bpm" if fhr else "")
+    else:
+        S["cardiac"] = "Not appreciated"
+    S["subchorionic"] = "Absent" if not data.get("subchorionic_present") else f"Present; {data.get('subchorionic_grade', 'Grade-I')}"
+    S["corpus"] = ("Not appreciated" if not data.get("corpus_present")
+                   else f"Appreciated; {data.get('corpus_size', '')}mm in {data.get('corpus_side', 'Right')} Ovary")
+    S["cervix"] = fmt_cm(data.get('cervix', '')) or "Normal"
+    S["internal_os"] = data.get("internal_os", "Closed")
+    _pl = str(data.get("placenta_pos", "") or "").strip()
+    _pl_map = {"Anterior": "Anteriorly", "Posterior": "Posteriorly", "Fundo-Anterior": "Fundo-Anteriorly",
+               "Fundo-Posterior": "Fundo-Posteriorly"}
+    S["placenta"] = ("Forming " + _pl_map.get(_pl, _pl)) if _pl else "-"
+    if data.get("placenta_os") and data.get("placenta_os") != "away from the Os":
+        S["placenta"] += f", {data.get('placenta_os')}"
+    S["choroid"] = data.get("choroid", "Appreciated, appear Normal")
+
+    # --- NT ---
+    nt = str(data.get('nt', '') or '').strip()
+    S["nt_pct"], S["nt_pct_note"], S["nt_val"] = None, "", "-"
+    if nt:
+        try:
+            ntf = float(nt)
+        except ValueError:
+            ntf = None
+        res = calculate_nt_pct(nt, crl)
+        inc = bool((res and res["pct"] >= 95) or (ntf and ntf >= 3.5))
+        status = "Increased" if inc else ("WNL" if res else "")
+        S["nt_val"] = f"{nt}mm" + (f" ({status})" if status else "")
+        if res:
+            S["nt_pct"] = res["pct"]
+        else:
+            S["nt_pct_note"] = "n/a (CRL outside 45-84 mm)"
+        if inc:
+            S["flags"].append(f"increased nuchal translucency ({nt}mm)")
+
+    # --- nasal bone (length and percentile come from the SR / machine) ---
+    nbs = str(data.get('nasal_bone', '') or '').strip()
+    nbl = str(data.get('nb_len', '') or '').strip()
+    nbp = str(data.get('nb_pct', '') or '').strip()
+    S["nb_pct"] = None
+    try:
+        S["nb_pct"] = float(nbp) if nbp else None
+    except ValueError:
+        pass
+    if nbs.lower() == "absent":
+        S["nb_val"] = "Absent"
+        S["flags"].append("absent nasal bone")
+    elif nbl:
+        short = S["nb_pct"] is not None and S["nb_pct"] < 5
+        S["nb_val"] = f"{nbl}mm" + (" (Short)" if short else " (WNL)" if S["nb_pct"] is not None else "")
+        if short:
+            S["flags"].append(f"short nasal bone ({nbl}mm)")
+    else:
+        S["nb_val"] = nbs or "-"
+
+    # --- pre-eclampsia screen: right and left uterine arteries, then the mean ---
+    S["uta"] = None
+
+    def _uf(k):
+        return str(data.get(k, '') or '').strip()
+
+    def _avg(*vals):
+        nums = []
+        for x in vals:
+            try:
+                nums.append(float(x))
+            except (TypeError, ValueError):
+                pass
+        return f"{sum(nums) / len(nums):.2f}" if nums else ""
+
+    def _n2(x):
+        try:
+            return f"{float(x):.2f}"
+        except (TypeError, ValueError):
+            return x or "-"
+
+    uta_rows = []
+    for lab, side in (("Rt. Uterine Artery", "uterine_right"), ("Lt. Uterine Artery", "uterine_left")):
+        if any(_uf(f"{side}_{m}") for m in ("pi", "ri", "sd")):
+            uta_rows.append((lab, _n2(_uf(f"{side}_pi")), _n2(_uf(f"{side}_ri")), _n2(_uf(f"{side}_sd"))))
+    pi = _uf('uterine_pi') or _avg(_uf('uterine_left_pi'), _uf('uterine_right_pi'))
+    ri = _uf('uterine_ri') or _avg(_uf('uterine_left_ri'), _uf('uterine_right_ri'))
+    sdv = _uf('uterine_sd') or _avg(_uf('uterine_left_sd'), _uf('uterine_right_sd'))
+    notch = str(data.get('uterine_notching', 'No notching') or 'No notching')
+    if pi or uta_rows:
+        res = calculate_ft_uta_pi(pi, crl, data.get('conception', 'Natural')) if pi else None
+        raised = bool(res and res["pct"] > 95)
+        notched = notch.lower() != "no notching"
+        text = (f"{'Raised impedance' if raised else 'Normal flow characteristics'} seen in the uterine arteries, "
+                f"{notch.lower()} seen.")
+        S["uta"] = {"text": text, "status": "Raised" if raised else ("WNL" if res else ""),
+                    "pct": res["pct"] if res else None,
+                    "note": "" if (res or not pi) else "percentile n/a - CRL outside 45-84 mm",
+                    "rows": uta_rows, "mean": (_n2(pi) if pi else "", _n2(ri) if ri else "", _n2(sdv) if sdv else "")}
+        if raised:
+            S["flags"].append(f"raised mean uterine artery PI ({pi})")
+        if notched:
+            S["flags"].append(f"{notch.lower()} in the uterine arteries")
+
+    # --- ductus venosus ---
+    S["dv"] = None
+    dvp = str(data.get('dv_pi', '') or '').strip()
+    wave = data.get('dv_awave', 'Positive')
+    if dvp:
+        res = calculate_ft_dv_pi(dvp, crl)
+        raised = bool(res and res["pct"] > 95)
+        bad_wave = wave in ("Absent", "Reversed")
+        wave_txt = "Normal S,D & A waves" if not bad_wave else f"{wave} a-wave"
+        text = f"{'Abnormal' if (raised or bad_wave) else 'Normal'} flow characteristics seen, PI- {dvp} ({wave_txt})"
+        S["dv"] = {"text": text, "status": "Raised" if raised else "", "pct": res["pct"] if res else None,
+                   "note": "" if res else "percentile n/a - CRL outside 45-84 mm"}
+        if raised:
+            S["flags"].append(f"raised ductus venosus PI ({dvp})")
+        if bad_wave:
+            S["flags"].append(f"{wave.lower()} a-wave in the ductus venosus")
+    return S
+
+def nt_nb_opinion(data):
+    S = nt_nb_summary(data)
+    ga = S["ga_txt"]
+    if data.get('cardiac_status', 'Present') == "Present":
+        txt = f"Intra uterine live pregnancy of {ga} +/-1w with good cardiac activity"
+    else:
+        txt = f"Intra uterine pregnancy of {ga} +/-1w with no cardiac activity appreciated"
+    if S["flags"]:
+        txt += ", with " + _join_and(S["flags"])
+    return txt + "."
+
+def nt_nb_preview(data):
+    S = nt_nb_summary(data)
+    L = [f"LMP- {data.get('lmp', '')}", "",
+         f"  {'CRL':<26}: {S['crl_line']}", f"  {'Cardiac pulsations':<26}: {S['cardiac']}",
+         f"  {'Subchorionic collection':<26}: {S['subchorionic']}", f"  {'Corpus luteal cyst':<26}: {S['corpus']}",
+         f"  {'Cervix':<26}: {S['cervix']}", f"  {'Internal Os':<26}: {S['internal_os']}",
+         f"  {'Placenta':<26}: {S['placenta']}", "", "FETAL CRANIUM:",
+         f"  {'Choroid plexi / Falx':<26}: {S['choroid']}",
+         f"  {'Nuchal translucency (NT)':<26}: {S['nt_val']}"
+         + (f"  [{S['nt_pct']:g}%]" if S['nt_pct'] is not None else (f"  [{S['nt_pct_note']}]" if S['nt_pct_note'] else "")),
+         f"  {'Nasal bone (NB)':<26}: {S['nb_val']}" + (f"  [{S['nb_pct']:g}%]" if S['nb_pct'] is not None else "")]
+    def _line(head, d):
+        if not d:
+            return []
+        extra = (" (" + ", ".join([x for x in (d["status"], f"{d['pct']:g}% for CRL") if x]) + ")") if d["pct"] is not None \
+            else (f" ({d['note']})" if d["note"] else "")
+        return ["", head, f"  {d['text']}{extra}."]
+    if S["uta"]:
+        d = S["uta"]
+        L += ["", "PRE-ECLAMPSIA SCREEN:", f"  {d['text']}", f"  {'Uterine artery':<24}{'PI':>7}{'RI':>7}{'S/D':>7}"]
+        for r in d["rows"]:
+            L.append(f"  {r[0]:<24}{r[1]:>7}{r[2]:>7}{r[3]:>7}")
+        m = d["mean"]
+        tail = (f"   ({d['status']}, {d['pct']:g}% for CRL)" if d["pct"] is not None
+                else (f"   ({d['note']})" if d["note"] else ""))
+        L.append(f"  {'Mean Uterine Arteries':<24}{m[0] or '-':>7}{m[1] or '-':>7}{m[2] or '-':>7}{tail}")
+    L += _line("DUCTUS VENOSUS:", S["dv"])
+    L += [""]
+    for lab, key in (("EDD (LMP)", "edd_lmp"), ("EDD (CUA)", "edd_cua")):
+        if data.get(key):
+            L.append(f"  {lab:<10}: {_fmt_date(data.get(key))}  +/-2W")
+    return L
 
 DOPPLER_KEYS = [f"{vsl}_{m}" for vsl in ("umbilical", "uterine", "uterine_left", "uterine_right", "mca")
                 for m in ("pi", "ri", "sd")] + ["mca_psv"]
@@ -964,6 +1363,35 @@ def _add_page_two_break(doc):
         r.font.name = "Calibri"
         r.font.size = Pt(pt)
 
+# Top heading of each template (printed in the navy title bar above the patient details box)
+REPORT_TITLES = {
+    "EARLY_OBS":     "USG OBS (EARLY PREGNANCY SCAN)",
+    "NT_NB":         "USG OBS (NT / NB SCAN)",
+    "T16":           "USG OBS (SECOND TRIMESTER SCAN)",
+    "T3":            "USG OBS (THIRD TRIMESTER SCAN)",
+    "COLOR_DOPPLER": "USG OBS (COLOR DOPPLER)",
+}
+
+def add_title_demo_box(doc, data, title, width_cm=17.0, fill=None):
+    """Navy title bar on top, patient details underneath in one bordered box (matches the Anomaly Scan report)."""
+    C = WD_ALIGN_PARAGRAPH.CENTER
+    half = width_cm / 2
+    t = _an_table(doc, 3, [half, half])
+    bar = t.cell(0, 0).merge(t.cell(0, 1))
+    set_cell_background(bar, fill or AN_NAVY)
+    bar.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    bp = bar.paragraphs[0]
+    bp.alignment = C
+    add_run(bp, title, bold=True, size=12, color=RGBColor(0x1F, 0x4E, 0x79))
+    age = str(data.get("patient_age", "") or "").strip()
+    agesex = f"{age}Y/{data.get('p_sex', 'F')}" if age else ""
+    cells = {(1, 0): f"NAME :-  {data.get('patient_name', '')}", (1, 1): f"DATE :-  {data.get('report_date', '')}",
+             (2, 0): f"AGE/SEX :-  {agesex}", (2, 1): f"REF. BY :-  {data.get('referred_by', '')}"}
+    for (r, c), txt in cells.items():
+        t.cell(r, c).vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        add_run(t.cell(r, c).paragraphs[0], txt, bold=True)
+    return t
+
 def build_docx_bytes(data, template_id):
     global ACTIVE_THEME
     if template_id == ANOMALY:            # Anomaly Scan has its own two-page blue layout
@@ -976,7 +1404,7 @@ def build_docx_bytes(data, template_id):
     _tight = template_id in ("T3", "T16")
     # Rare worst case (scar-thickness line AND a Doppler table): claw back a few more points so it still fits
     _tighter = _tight and ((bool(data.get("measure_scar")) and any(data.get(k) for k in DOPPLER_KEYS))
-                           or (template_id == "T3" and bool(doppler_advice(data))))   # the advice paragraph needs the room
+                           or (template_id == "T3" and bool(doppler_advice(data) or softmarker_advice(data, template_id))))   # the advice paragraph needs the room
     def _gap():
         p = doc.add_paragraph()
         if _tight:
@@ -1008,7 +1436,7 @@ def build_docx_bytes(data, template_id):
     # === FLEXIBLE TOP SPACER ===
     
     # 2 blank lines (10pt) to push the report down
-    for _ in range(1 if _tight else 2):
+    for _ in range(2):
         _p = doc.add_paragraph()
         _p.paragraph_format.space_after = Pt(0)
         _p.paragraph_format.space_before = Pt(0)
@@ -1030,38 +1458,13 @@ def build_docx_bytes(data, template_id):
         
     # === END SPACER ===
 
-    # 1. HEADER TABLE
-    demo_table = doc.add_table(rows=2, cols=2)
-    demo_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    set_table_borders(demo_table)
-    for row in demo_table.rows:
-        row.cells[0].width = Cm(8.5)
-        row.cells[1].width = Cm(8.5)
-    add_run(demo_table.cell(0, 0).paragraphs[0], f"NAME :- {data.get('patient_name', '')}", bold=True)
-    add_run(demo_table.cell(0, 1).paragraphs[0], f"DATE :- {data.get('report_date', '')}", bold=True)
-    add_run(demo_table.cell(1, 0).paragraphs[0], f"AGE/SEX :- {data.get('patient_age', '')}Y/ {data.get('p_sex', 'F')}", bold=True)
-    add_run(demo_table.cell(1, 1).paragraphs[0], f"REF. BY:- {data.get('referred_by', '')}", bold=True)
-    
-    # 8pt gap
+    # 1. TITLE BAR + PATIENT DETAILS BOX (same look as the Anomaly Scan report; each template has its own heading)
+    add_title_demo_box(doc, data, REPORT_TITLES.get(template_id, "USG OBS"), fill=COLOR_THEMES[ACTIVE_THEME][1])
+
+    # gap below the box
     p_gap1 = doc.add_paragraph()
     p_gap1.paragraph_format.space_after = Pt(0)
-    p_gap1.paragraph_format.line_spacing = Pt(5 if _tight else 8)
-
-    # 2. TITLE
-    title_p = doc.add_paragraph()
-    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    add_run(title_p, "COLOR DOPPLER OBSTETRICS REPORT" if template_id == COLOR_DOPPLER else "ULTRASOUND OBSTETRICS REPORT",
-            bold=True, underline=True, size=14, color=RGBColor(0x1F, 0x4E, 0x79))
-    
-    # 5pt gap
-    p_gap2 = doc.add_paragraph()
-    p_gap2.paragraph_format.space_after = Pt(0)
-    p_gap2.paragraph_format.line_spacing = Pt(3 if _tight else 5)
-    
-    # 5pt gap
-    p_gap3 = doc.add_paragraph()
-    p_gap3.paragraph_format.space_after = Pt(0)
-    p_gap3.paragraph_format.line_spacing = Pt(3 if _tight else 5)
+    p_gap1.paragraph_format.line_spacing = Pt((8 if _tight else 10) + (5 if template_id == "NT_NB" else 0))
 
     # 3. EARLY OBS
     if template_id == "EARLY_OBS":
@@ -1088,29 +1491,156 @@ def build_docx_bytes(data, template_id):
 
         add_dating_table(doc, data)
 
-    # 3.5 NT_NB SCAN
+    # 3.5 NT_NB SCAN (laid out like the NT/NB template; shading follows the report's colour theme)
     elif template_id == "NT_NB":
-        nt_table = doc.add_table(rows=4, cols=4)
-        set_table_borders(nt_table)
-        for row in nt_table.rows:
-            row.cells[0].width = Cm(4.0); row.cells[1].width = Cm(4.0); row.cells[2].width = Cm(4.0); row.cells[3].width = Cm(4.0)
-            
-        nt_data = [
-            ("CRL", f"{data.get('crl', '')}mm", "NT", f"{data.get('nt', '')}mm"),
-            ("Nasal Bone", data.get('nasal_bone', ''), "FHR", f"{data.get('fhr_val', '')} bpm"),
-            ("DV PI", data.get('dv_pi', ''), "DV A-Wave", data.get('dv_awave', '')),
-            ("Placenta", data.get('placenta_pos', ''), "Cervix", fmt_cm(data.get('cervix', ''))),
-        ]
-        
-        for i, (l1, v1, l2, v2) in enumerate(nt_data):
-            add_run(nt_table.cell(i, 0).paragraphs[0], l1, bold=True, size=10)
-            add_run(nt_table.cell(i, 1).paragraphs[0], v1, italic=True, size=10)
-            add_run(nt_table.cell(i, 2).paragraphs[0], l2, bold=True, size=10)
-            add_run(nt_table.cell(i, 3).paragraphs[0], v2, italic=True, size=10)
-            
-        doc.add_paragraph()
-        
-        add_dating_table(doc, data)
+        S = nt_nb_summary(data)
+        _navy = RGBColor(0x1F, 0x4E, 0x79)
+        _C = WD_ALIGN_PARAGRAPH.CENTER
+
+        def _nt_head(txt):
+            hp = doc.add_paragraph()
+            hp.paragraph_format.space_before = Pt(10)
+            hp.paragraph_format.space_after = Pt(3)
+            hp.paragraph_format.keep_with_next = True
+            add_run(hp, txt, bold=True, underline=True, color=_navy)
+            return hp
+
+        def _nt_table(rows, widths, head=None):
+            """rows: [(label, value)] or [(label, value, pct)]; label column shaded in the theme colour."""
+            n = len(rows) + (1 if head else 0)
+            t = doc.add_table(rows=n, cols=len(widths))
+            set_table_borders(t)
+            t.alignment = WD_TABLE_ALIGNMENT.LEFT
+            t.autofit = False
+            for i, w in enumerate(widths):
+                t.columns[i].width = Cm(w)
+            for r in t.rows:
+                for i, w in enumerate(widths):
+                    r.cells[i].width = Cm(w)
+            off = 0
+            if head:
+                for i, h in enumerate(head):
+                    set_cell_background(t.cell(0, i), get_gradient_color(0))
+                    t.cell(0, i).paragraphs[0].alignment = _C if i else WD_ALIGN_PARAGRAPH.LEFT
+                    add_run(t.cell(0, i).paragraphs[0], h, bold=True, size=10)
+                off = 1
+            for ri, row in enumerate(rows):
+                c0 = t.cell(ri + off, 0)
+                set_cell_background(c0, get_gradient_color(1 + ri % 2))
+                add_run(c0.paragraphs[0], row[0], italic=True, size=10)
+                vc = t.cell(ri + off, 1)
+                vc.paragraphs[0].alignment = _C
+                add_run(vc.paragraphs[0], row[1], italic=True, size=10)
+                if len(widths) == 3:
+                    pc = t.cell(ri + off, 2)
+                    pc.paragraphs[0].alignment = _C
+                    _nt_pct_cell(pc.paragraphs[0], row[2] if len(row) > 2 else None)
+            return t
+
+        def _nt_pct_cell(p, pct, note=""):
+            if pct is None:
+                if note:
+                    add_run(p, note, italic=True, size=8.5)
+                return
+            bar = generate_percentile_bar_inline(str(pct))
+            add_run(p, f"{pct:g}%  ", bold=True, size=9)
+            if bar:
+                add_inline_bar(p, bar, width_cm=2.8, text_pt=9)
+
+        lmp = str(data.get('lmp', '') or '').strip()
+        if lmp:
+            lp = doc.add_paragraph()
+            lp.paragraph_format.space_after = Pt(8)
+            add_run(lp, "LMP- ", bold=True, italic=True, color=_navy)
+            add_run(lp, lmp, italic=True)
+
+        _nt_table([("CRL", S["crl_line"]), ("Cardiac pulsations", S["cardiac"]),
+                   ("Subchorionic collection", S["subchorionic"]), ("Corpus luteal cyst", S["corpus"]),
+                   ("Cervix", S["cervix"]), ("Internal Os", S["internal_os"]), ("Placenta", S["placenta"])],
+                  [5.5, 11.5])
+
+        _nt_head("FETAL CRANIUM:")
+        ct = _nt_table([("Bilateral choroid Plexi /Falx", S["choroid"], None),
+                        ("Nuchal translucency (NT)", S["nt_val"], S["nt_pct"]),
+                        ("Nasal bone (NB)", S["nb_val"], S["nb_pct"])],
+                       [5.5, 5.5, 6.0], head=["Fetal cranium", "Measurement", "Percentile"])
+        _m = ct.cell(1, 1).merge(ct.cell(1, 2))               # choroid row: one wide value cell
+        for _extra in _m.paragraphs[1:]:
+            _extra._element.getparent().remove(_extra._element)
+        if S["nt_pct"] is None and S["nt_pct_note"]:
+            _nt_pct_cell(ct.cell(2, 2).paragraphs[0], None, S["nt_pct_note"])
+
+        if S["uta"]:
+            _u = S["uta"]
+            _nt_head("PRE-ECLAMPSIA SCREEN:")
+            up = doc.add_paragraph()
+            up.paragraph_format.space_after = Pt(4)
+            add_run(up, _u["text"], italic=True)
+            _mean = ("Mean Uterine Arteries",) + tuple(_u["mean"][i] or "-" for i in range(3))
+            _all = list(_u["rows"]) + [_mean]
+            _w = [4.6, 2.3, 2.3, 2.3, 5.5]
+            ut = doc.add_table(rows=len(_all) + 1, cols=5)
+            set_table_borders(ut)
+            ut.alignment = WD_TABLE_ALIGNMENT.LEFT
+            ut.autofit = False
+            for ci, w in enumerate(_w):
+                ut.columns[ci].width = Cm(w)
+                for r_ in ut.rows:
+                    r_.cells[ci].width = Cm(w)
+            for ci, h in enumerate(("Uterine Artery", "PI", "RI", "S/D", "Percentile")):
+                set_cell_background(ut.cell(0, ci), get_gradient_color(0))
+                ut.cell(0, ci).paragraphs[0].alignment = _C if ci else WD_ALIGN_PARAGRAPH.LEFT
+                add_run(ut.cell(0, ci).paragraphs[0], h, bold=True, size=10)
+            for ri_, row_ in enumerate(_all, start=1):
+                is_mean = ri_ == len(_all)
+                set_cell_background(ut.cell(ri_, 0), get_gradient_color(1 + (ri_ - 1) % 2))
+                add_run(ut.cell(ri_, 0).paragraphs[0], row_[0], italic=not is_mean, bold=is_mean, size=10)
+                for ci in (1, 2, 3):
+                    ut.cell(ri_, ci).paragraphs[0].alignment = _C
+                    add_run(ut.cell(ri_, ci).paragraphs[0], row_[ci], italic=not is_mean, bold=is_mean, size=10)
+                ut.cell(ri_, 4).paragraphs[0].alignment = _C
+                if is_mean:
+                    _nt_pct_cell(ut.cell(ri_, 4).paragraphs[0], _u["pct"], _u["note"])
+
+        for _head, _d in (("DUCTUS VENOSUS:", S["dv"]),):
+            if not _d:
+                continue
+            _nt_head(_head)
+            pp = doc.add_paragraph()
+            pp.paragraph_format.space_after = Pt(2)
+            add_run(pp, _d["text"], italic=True)
+            if _d["status"]:
+                add_run(pp, f" ({_d['status']})", italic=True)
+            add_run(pp, ".  " if _d["pct"] is None else "   ", italic=True)
+            if _d["pct"] is not None:
+                _bar = generate_percentile_bar_inline(str(_d["pct"]))
+                add_run(pp, f"{_d['pct']:g}%  ", bold=True, size=9)
+                if _bar:
+                    add_inline_bar(pp, _bar, width_cm=2.8, text_pt=11)
+            elif _d["note"]:
+                add_run(pp, f"({_d['note']})", italic=True, size=9)
+
+        gp = doc.add_paragraph()
+        gp.paragraph_format.space_after = Pt(0)
+        gp.paragraph_format.line_spacing = Pt(13)
+        _edd_rows = [(lab, _fmt_date(data.get(k)), "\u00b12W") for lab, k in (("EDD (LMP)", "edd_lmp"), ("EDD (CUA)", "edd_cua"))
+                     if data.get(k) and not (k == "edd_lmp" and lmp == "Not Sure")]
+        if _edd_rows:
+            et = doc.add_table(rows=len(_edd_rows), cols=3)
+            set_table_borders(et)
+            et.alignment = WD_TABLE_ALIGNMENT.LEFT
+            et.autofit = False
+            for ci, w in enumerate((3.0, 3.6, 2.2)):
+                et.columns[ci].width = Cm(w)
+            for ri, (lab, dt, pm) in enumerate(_edd_rows):
+                for ci, w in enumerate((3.0, 3.6, 2.2)):
+                    et.cell(ri, ci).width = Cm(w)
+                set_cell_background(et.cell(ri, 0), get_gradient_color(1 + ri % 2))
+                add_run(et.cell(ri, 0).paragraphs[0], lab, italic=True, size=10)
+                et.cell(ri, 1).paragraphs[0].alignment = _C
+                add_run(et.cell(ri, 1).paragraphs[0], dt, italic=True, size=10)
+                et.cell(ri, 2).paragraphs[0].alignment = _C
+                add_run(et.cell(ri, 2).paragraphs[0], pm, italic=True, size=10)
 
     # 4. STANDARD OB
     else:
@@ -1363,6 +1893,10 @@ def build_docx_bytes(data, template_id):
             add_run(p, "Scar Thickness: ", bold=True)
             add_run(p, scar_text(data.get('scar_size', '')), italic=True)
 
+        # --- SOFT MARKERS: last lines under the cord / scar line ---
+        for _n in softmarker_notes(data):
+            p = doc.add_paragraph(); add_run(p, _n, bold=True, italic=True)
+
         # --- DOPPLER SECTION WITH DYNAMIC TABLE ---
         if template_id == COLOR_DOPPLER:
             pass    # drawn on page 1, under the biometry (see dop_layout above)
@@ -1458,8 +1992,12 @@ def build_docx_bytes(data, template_id):
 
     # 5. IMPRESSION
     _ = _blank() if _tight else _gap()
+    if template_id == "NT_NB":
+        _sp = doc.add_paragraph()
+        _sp.paragraph_format.space_after = Pt(0)
+        _sp.paragraph_format.line_spacing = Pt(5)
     imp_head = doc.add_paragraph()
-    add_run(imp_head, "IMPRESSION:", bold=True, underline=True, color=RGBColor(0x1F, 0x4E, 0x79))
+    add_run(imp_head, "OPINION:" if template_id == "NT_NB" else "IMPRESSION:", bold=True, underline=True, color=RGBColor(0x1F, 0x4E, 0x79))
     mean_age = data.get('mean_age', '')
     if template_id == "EARLY_OBS":
         if data.get('cardiac_status') == "Blighted Ovum":
@@ -1469,17 +2007,39 @@ def build_docx_bytes(data, template_id):
         else:
             imp_text = f"Intra uterine live pregnancy of {data.get('ga_crl', '')} +/-1w with good cardiac activity."
     elif template_id == "NT_NB":
-        imp_text = f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
+        imp_text = nt_nb_opinion(data)
     else:
         pres_text = presentation_text(data)
             
-        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text}{',' if _is_lie_presentation(data) else ''} of approx. {mean_age} gestation age."
+        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text}{',' if _is_lie_presentation(data) else ''} of approx. {mean_age} gestation age"
+        _psv_f = doppler_psv_finding(data) if template_id in ("T3", COLOR_DOPPLER) else ""
+        _pi_f = doppler_pi_findings(data, capitalise=(template_id == "T3")) if template_id in ("T3", COLOR_DOPPLER) else []
+        # T3: pathological PI findings go straight into the impression line; Color Doppler gets its own sentence below.
+        # A raised MCA PSV goes into the impression line in both templates.
+        _inline = softmarker_phrases(data) + (_pi_f if template_id == "T3" else []) + ([_psv_f] if _psv_f else [])
+        imp_text += impression_with_clause(_inline, data)
+        imp_text += "."
+    if template_id == "NT_NB":
+        _sub = doc.add_paragraph()
+        _sub.paragraph_format.space_after = Pt(2)
+        add_run(_sub, "ULTRASOUND EARLY OBS REVEALS:", size=8)
     p = doc.add_paragraph(); add_run(p, imp_text, bold=True, italic=True)
     _imp_p = p
+    _adv_list = doppler_advice_list(data) if template_id in ("T3", COLOR_DOPPLER) else []
+    _sm_adv = softmarker_advice(data, template_id) if template_id in ("T16", "T3", COLOR_DOPPLER) else ""
+    if _sm_adv:
+        _adv_list = _adv_list + [_sm_adv]
+    _adv = "\n\n".join(_adv_list)
     if template_id == COLOR_DOPPLER and doppler_status(data)["all_normal"]:
         _blank()
         p = doc.add_paragraph(); add_run(p, NORMAL_DOPPLER_LINE, bold=True, italic=True)
-    _adv = doppler_advice(data) if template_id in ("T3", COLOR_DOPPLER) else ""
+    if template_id == COLOR_DOPPLER and _pi_f:    # pathological PI: own sentence after a blank line
+        _b = _blank()
+        p = doc.add_paragraph(); add_run(p, "Doppler study reveals " + _join_and(_pi_f) + ".", bold=True, italic=True)
+        if _adv:
+            _b.paragraph_format.keep_with_next = True
+            p.paragraph_format.keep_with_next = True
+            _imp_p.paragraph_format.keep_with_next = True
     _sf = smaller_fetus_remark(data) if template_id not in ("EARLY_OBS", "NT_NB") else ""
     if _sf:                                    # fetus smaller than LMP dates: remark after a blank line, bold italics
         _b = _blank()
@@ -1488,10 +2048,11 @@ def build_docx_bytes(data, template_id):
             _b.paragraph_format.keep_with_next = True
             p.paragraph_format.keep_with_next = True
             _imp_p.paragraph_format.keep_with_next = True
-    if _adv:                                   # pathological Doppler: advice after a blank line, bold italics
-        _blank().paragraph_format.keep_with_next = True
-        p = doc.add_paragraph(); add_run(p, _adv, bold=True, italic=True)
-        p.paragraph_format.keep_with_next = True
+    if _adv:                                   # pathological Doppler: each advisory after a blank line, bold italics
+        for _a in _adv_list:
+            _blank().paragraph_format.keep_with_next = True
+            p = doc.add_paragraph(); add_run(p, _a, bold=True, italic=True)
+            p.paragraph_format.keep_with_next = True
         # If the page is too full for impression + advice + PNDT box, they move to the next page TOGETHER
         # (instead of the PNDT box being left alone on a second page).
         imp_head.paragraph_format.keep_with_next = True
@@ -1515,6 +2076,7 @@ def build_docx_bytes(data, template_id):
         _br.font.size = Pt(7)          # the line-break run would otherwise count as a full 11 pt line
     add_run(p, "Note:- This is a obstetrical ultrasound, mainly done for estimation of gestational age, amount of liquor, placental position and general well-being of the fetus. Moreover, the anomalies in relation to fetal heart and limbs are extremely difficult to assess due to constantly changing position of the fetus and overlapping of its various parts.", bold=True, italic=True, size=(6.5 if _tighter else 7 if _tight else 8))
 
+    keep_row_together(disc_table)
     finish_document(doc)
     normalize_table_props(doc)
     buf = io.BytesIO(); doc.save(buf); return buf.getvalue()
@@ -1606,7 +2168,9 @@ def anomaly_opinion(data):
     ga = _split_ga(data.get("mean_age"))
     age = f"{ga[0]} weeks {ga[1]:02d} days \u00b1 2w" if ga else str(data.get("mean_age", "") or "____")
     pres = presentation_text(data).lower()
-    return f"Single live intra-uterine foetus in {pres}{',' if _is_lie_presentation(data) else ''} of Approx. {age} gestational age."
+    _tail = " and ".join(softmarker_phrases(data))
+    _txt = f"Single live intra-uterine foetus in {pres}{',' if _is_lie_presentation(data) else ''} of Approx. {age} gestational age"
+    return _txt + (f" with {_tail}." if _tail else ".")
 
 def anomaly_doppler_rows(data):
     """[(label, PI value, percentile, remark, remark_is_abnormal)] - UA, mean uterine, (MCA if present), DV."""
@@ -1645,14 +2209,38 @@ AN_ADVICE_BEYOND_34 = ("Adv- Urgent obstetric consultation is advised. Close fet
                        "within 36\u201337+6 weeks where indicated by the Doppler abnormality and overall clinical assessment. "
                        "Earlier intervention may be necessary in case of fetal or maternal compromise.")
 
-def _advice_for_ga(data):
-    """Up to 34 weeks (34w0d) -> prompt consultation; beyond 34 weeks -> urgent consultation + delivery planning."""
+def _ga_days(data):
     ga = _split_ga(data.get("mean_age"))
     if ga:
-        days = ga[0] * 7 + ga[1]
-    else:
-        days = (_pf(data.get("ga_weeks_dop")) or 0) * 7
-    return AN_ADVICE_BEYOND_34 if days > 34 * 7 else AN_ADVICE_UP_TO_34
+        return ga[0] * 7 + ga[1]
+    return (_pf(data.get("ga_weeks_dop")) or 0) * 7
+
+def _advice_for_ga(data):
+    """Up to 34 weeks (34w0d) -> prompt consultation; beyond 34 weeks -> urgent consultation + delivery planning."""
+    return AN_ADVICE_BEYOND_34 if _ga_days(data) > 34 * 7 else AN_ADVICE_UP_TO_34
+
+_SM_COMMON = ("Correlation with first-trimester screening / maternal serum markers is advised, along with a detailed "
+              "anomaly scan to look for other structural anomalies or soft markers if not already done. ")
+SM_ADV_CPC = ("Adv- Isolated choroid plexus cysts are a benign finding and usually resolve by 28 weeks. " + _SM_COMMON +
+              "Genetic counselling is advised if the screening is high risk or if any other abnormality is detected.")
+SM_ADV_EIF = ("Adv- Isolated echogenic intracardiac focus is a common normal variant and does not indicate any cardiac "
+              "dysfunction. " + _SM_COMMON +
+              "Genetic counselling is advised if the screening is high risk or if any other abnormality is detected.")
+SM_ADV_BOTH = ("Adv- The presence of more than one soft marker (choroid plexus cyst and echogenic intracardiac focus) "
+               "slightly increases the likelihood of a chromosomal abnormality. " + _SM_COMMON +
+               "Genetic counselling and consideration of non-invasive prenatal testing (NIPT) is advised.")
+SM_DETAILED_SCAN = ", along with a detailed anomaly scan to look for other structural anomalies or soft markers if not already done"
+
+def softmarker_advice(data, template_id):
+    """Advice for a choroid plexus cyst / echogenic intracardiac focus / both. T16 under 24 weeks: starts with
+    'Anomaly scan is advised.' and drops the 'detailed anomaly scan ... if not already done' phrase."""
+    cp, ei = bool(cpc_phrase(data)), bool(eif_phrase(data))
+    if not (cp or ei):
+        return ""
+    text = SM_ADV_BOTH if (cp and ei) else SM_ADV_CPC if cp else SM_ADV_EIF
+    if template_id == "T16" and _ga_days(data) < 24 * 7:
+        text = "Adv- Anomaly scan is advised. " + text[len("Adv- "):].replace(SM_DETAILED_SCAN, "")
+    return text
 
 def anomaly_advice(data):
     """Advice line under the opinion - only when any Doppler index is pathological."""
@@ -1660,13 +2248,67 @@ def anomaly_advice(data):
         return ""
     return _advice_for_ga(data)
 
-def doppler_advice(data):
-    """T3 / Color Doppler impression: advice when the mean uterine artery or umbilical artery PI is above the 95th
-    percentile, the MCA PI or CPR is below the 5th percentile, or the MCA PSV is 1.5 MoM or more."""
+AN_ADVICE_PSV = ("Adv- Evaluate for the cause of fetal anaemia: maternal blood group, Rh/atypical antibody screen (indirect Coombs) "
+                 "and TORCH serology, Kleihauer-Betke test (fetomaternal haemorrhage), and haemoglobinopathy screening as "
+                 "indicated. Repeat MCA PSV within 1 week, sooner if rising or if there is reduced fetal movement. Fetal blood "
+                 "sampling and intrauterine transfusion may be considered at a tertiary centre as clinically indicated. "
+                 "Interpret with caution beyond 35 weeks, as the false-positive rate rises.")
+
+def _join_and(items):
+    items = [i for i in items if i]
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+def doppler_pi_findings(data, capitalise=True):
+    """Pathological PI-type findings (UA / uterine Rt, Lt, Mean / MCA PI / CPR) as impression fragments,
+    e.g. 'Increased Umbilical artery PI (1.45; 97.2th percentile)'. Percentile rules as in doppler_status()."""
     s = doppler_status(data)
-    if not any(s[k] in ("Raised", "Reduced") for k in ("ua", "uta", "mca", "cpr", "psv")):
+    out = []
+    def add(adj, label, value, pct):
+        if not value:
+            return
+        a = adj if capitalise else adj.lower()
+        pc = f"; {pct}th percentile" if pct not in (None, "") else ""
+        out.append(f"{a} {label} ({value}{pc})")
+    if s["ua"] == "Raised":
+        add("Increased", "Umbilical artery PI", data.get("umbilical_pi"), data.get("umbilical_pct"))
+    has_l = bool(data.get("uterine_left_pi"))
+    has_r = bool(data.get("uterine_right_pi"))
+    if s["uta_right"] == "Raised":
+        add("Increased", "Right Uterine artery PI", data.get("uterine_right_pi"), data.get("uterine_right_pct"))
+    if s["uta_left"] == "Raised":
+        add("Increased", "Left Uterine artery PI", data.get("uterine_left_pi"), data.get("uterine_left_pct"))
+    # Mean uterine PI: skipped when only one side was measured (the mean would just repeat that side)
+    if s["uta"] == "Raised" and not (has_l != has_r):
+        add("Increased", "Mean Uterine artery PI", data.get("uterine_pi"), data.get("uterine_pct"))
+    if s["mca"] == "Reduced":
+        add("Reduced", "MCA PI", data.get("mca_pi"), data.get("mca_pct"))
+    if s["cpr"] == "Reduced":
+        add("Reduced", "Cerebro-Placental Ratio", data.get("cpr"), data.get("cpr_pct"))
+    return out
+
+def doppler_psv_finding(data):
+    """Impression fragment for a pathological MCA PSV (>= 1.5 MoM), else ''."""
+    if doppler_status(data)["psv"] != "Raised":
         return ""
-    return _advice_for_ga(data)
+    return f"Raised MCA PSV at {data.get('mca_psv_mom')} MoM (\u22651.5 MoM), suspicious for fetal anaemia"
+
+def doppler_advice_list(data):
+    """Advisories for T3 / Color Doppler, each its own paragraph:
+    MCA PSV >= 1.5 MoM -> fetal-anaemia advisory (first);
+    any pathological PI finding (UA, uterine Rt/Lt/Mean, MCA PI, CPR) -> the GA-based advisory."""
+    adv = []
+    if doppler_psv_finding(data):
+        adv.append(AN_ADVICE_PSV)
+    s = doppler_status(data)
+    if any(s[k] in ("Raised", "Reduced") for k in ("ua", "uta", "uta_left", "uta_right", "mca", "cpr")):
+        adv.append(_advice_for_ga(data))
+    return adv
+
+def doppler_advice(data):
+    """All advisories as one string (blank-line separated); empty when nothing is pathological."""
+    return "\n\n".join(doppler_advice_list(data))
 
 # (label, data key prefix, has percentile)  -- per table
 AN_CRANIUM = [("B.P.D", "bpd", True), ("HEAD CIRCUMFERENCE", "hc", True), ("CEREBELLUM (TCD)", "tcd", True),
@@ -1691,6 +2333,18 @@ AN_PNDT = ('"The radiologist has not conducted or caused to conduct any pre nata
            'purpose of determining the sex of the foetus. No person including the person conducting the diagnostic procedure '
            'has communicated to the pregnant woman concerned or her relatives or any other person the sex of the foetus by '
            'words, signs, or in any other manner."')
+
+def _an_text_with_note(texts, normal_line, note):
+    """Replace the 'normal' sentence by the soft-marker note when there is one."""
+    return [note if (note and t == normal_line) else t for t in texts]
+
+def anomaly_cranium_text(data):
+    ph = cpc_phrase(data)
+    return _an_text_with_note(AN_CRANIUM_TEXT, "No identifiable intracranial lesion seen.", f"Note is made of {ph}." if ph else "")
+
+def anomaly_thorax_text(data):
+    ph = eif_phrase(data)
+    return _an_text_with_note(AN_THORAX_TEXT, "No evidence of SOL in the thorax.", f"Note is made of {ph}." if ph else "")
 
 # ---------- docx helpers ----------
 def _an_run(p, text, bold=False, italic=False, size=9.5, color=None):
@@ -1717,9 +2371,11 @@ def _an_spacer(doc, pt=5.5, page_break=False):
         p.paragraph_format.page_break_before = True
     _an_run(p, "\u200B", size=pt)
 
-def _an_gap(doc, line=6.5):
+_AN_GAP_LINE = [6.5]          # blank-gap height; build_anomaly_docx_bytes lowers it when page 2 is unusually full
+
+def _an_gap(doc, line=None):
     p = doc.add_paragraph()
-    _an_flat(p, line=line)
+    _an_flat(p, line=line or _AN_GAP_LINE[0])
 
 def _an_lines(doc, texts):
     for t in texts:
@@ -1727,7 +2383,7 @@ def _an_lines(doc, texts):
         _an_flat(p, after=1, line=12.6)
         _an_run(p, t)
 
-def _an_heading(doc, text):
+def _an_heading(doc, text, before=7):
     p = doc.add_paragraph()
     pPr = p._p.get_or_add_pPr()                       # border first, so python-docx keeps the schema order
     bd = OxmlElement("w:pBdr")
@@ -1736,7 +2392,7 @@ def _an_heading(doc, text):
         b.set(qn(f"w:{k}"), val)
     bd.append(b)
     pPr.append(bd)
-    _an_flat(p, before=7, after=3)
+    _an_flat(p, before=before, after=3)
     p.paragraph_format.keep_with_next = True
     _an_run(p, text, bold=True, size=10.5, color=AN_NAVY)
 
@@ -1818,6 +2474,9 @@ def anomaly_edd_rows(data):
     return [("EGA BY LMP", ega_lmp, "EDD (LMP)", edd_lmp), ("EGA BY USG", ega_usg, "EDD (CUA)", _an_date(data.get("edd_cua")))]
 
 def build_anomaly_docx_bytes(data):
+    # Doppler advice AND soft-marker advice together make page 2 very full: smaller gaps / advice text keep it at 2 pages
+    _two = bool(anomaly_advice(data) and softmarker_advice(data, ANOMALY))
+    _AN_GAP_LINE[0] = 2.5 if _two else 6.5
     C, J = WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.JUSTIFY
     doc = Document()
     sec = doc.sections[0]
@@ -1832,6 +2491,7 @@ def build_anomaly_docx_bytes(data):
     # ---- page 1 top spacer: 2.5 lines of 10 pt (two 10 pt + one 5 pt blank line) ----
     _an_spacer(doc, pt=10)
     _an_spacer(doc, pt=10)
+    _an_spacer(doc, pt=10)
     _an_spacer(doc, pt=5)
 
     # ---- title bar + patient details (details box has no blue) ----
@@ -1844,7 +2504,7 @@ def build_anomaly_docx_bytes(data):
     _an_cell(t.cell(1, 1), f"DATE :-  {data.get('report_date', '')}", bold=True)
     _an_cell(t.cell(2, 0), f"AGE/SEX :-  {agesex}", bold=True)
     _an_cell(t.cell(2, 1), f"REF. BY :-  {data.get('referred_by', '')}", bold=True)
-    _an_gap(doc)
+    _an_gap(doc, line=4)
 
     # ---- EGA / EDD ----
     # Same Dating / LMP / GA / EDD layout as the T3 and T16 reports (rows come from the shared dating_rows())
@@ -1862,7 +2522,7 @@ def build_anomaly_docx_bytes(data):
     _an_run(p, "There is a single, live, normal intrauterine gestational pregnancy.")
 
     # ---- foetal survey (defaults pre-filled; placenta + numbers come from the form) ----
-    _an_heading(doc, "FOETAL SURVEY & ENVIRONMENT")
+    _an_heading(doc, "FOETAL SURVEY & ENVIRONMENT", before=5)
     liq, liq_abn = anomaly_liquor(data)
     survey = [("FHR", f"{str(data.get('fhr', '') or '').strip() or '____'} bpm - Regular", False),
               ("Presentation", anomaly_presentation_row(data), False),
@@ -1875,17 +2535,17 @@ def build_anomaly_docx_bytes(data):
         _an_label(t.rows[i].cells[0], label)
         _an_cell(t.rows[i].cells[1], val, bold=bold)
 
-    _an_heading(doc, "CRANIUM")
+    _an_heading(doc, "CRANIUM", before=5)
     _an_measure_table(doc, AN_CRANIUM, data)
-    _an_gap(doc)
-    _an_lines(doc, AN_CRANIUM_TEXT)
-    _an_heading(doc, "FOETAL SPINE")
+    _an_gap(doc, line=4)
+    _an_lines(doc, anomaly_cranium_text(data))
+    _an_heading(doc, "FOETAL SPINE", before=5)
     _an_lines(doc, AN_SPINE_TEXT)
-    _an_heading(doc, "FACE")
+    _an_heading(doc, "FACE", before=5)
     _an_lines(doc, AN_FACE_TEXT)
-    _an_heading(doc, "ABDOMEN")
+    _an_heading(doc, "ABDOMEN", before=5)
     _an_measure_table(doc, AN_ABDOMEN, data)
-    _an_gap(doc)
+    _an_gap(doc, line=4)
     _an_lines(doc, AN_ABDOMEN_TEXT)
 
     p = doc.add_paragraph()
@@ -1896,10 +2556,11 @@ def build_anomaly_docx_bytes(data):
     # ---- page 2 top spacer: same 2.5 lines of 10 pt ----
     _an_spacer(doc, pt=10, page_break=True)
     _an_spacer(doc, pt=10)
+    _an_spacer(doc, pt=10)
     _an_spacer(doc, pt=5)
 
     _an_heading(doc, "THORAX")
-    _an_lines(doc, AN_THORAX_TEXT)
+    _an_lines(doc, anomaly_thorax_text(data))
     _an_heading(doc, "UPPER EXTREMITIES")
     _an_measure_table(doc, AN_UPPER, data)
     _an_heading(doc, "LOWER EXTREMITIES")
@@ -1936,11 +2597,18 @@ def build_anomaly_docx_bytes(data):
     _an_flat(p, after=7)
     _an_run(p, anomaly_opinion(data), bold=True)
     adv = anomaly_advice(data)
+    sm_adv = softmarker_advice(data, ANOMALY)
+    _adv_size, _adv_after = (8, 3) if _two else (9.5, 7)   # two advice paragraphs: smaller, so page 2 still holds the PNDT box
     if adv:                                   # pathological Doppler: advice goes on the next line, bold italics
         p = doc.add_paragraph()
-        _an_flat(p, after=7)
+        _an_flat(p, after=_adv_after)
         p.alignment = J
-        _an_run(p, adv, bold=True, italic=True)
+        _an_run(p, adv, bold=True, italic=True, size=_adv_size)
+    if sm_adv:                                # soft-marker advice (choroid plexus cyst / EIF), bold italics
+        p = doc.add_paragraph()
+        _an_flat(p, after=_adv_after)
+        p.alignment = J
+        _an_run(p, sm_adv, bold=True, italic=True, size=_adv_size)
 
     t = _an_table(doc, 1, [17.2])
     c = t.cell(0, 0)
@@ -1949,6 +2617,7 @@ def build_anomaly_docx_bytes(data):
     _an_flat(c.paragraphs[0])
     _an_run(c.paragraphs[0], AN_PNDT, bold=True, italic=True, size=8.5, color=AN_NAVY)
 
+    keep_row_together(t)
     finish_document(doc)
     normalize_table_props(doc)
     buf = io.BytesIO()
@@ -1987,6 +2656,10 @@ def render_anomaly_preview(data):
     L += ["", "OPINION", "  Ultrasound Anomaly scan reveals:", f"  {anomaly_opinion(data)}"]
     if anomaly_advice(data):
         L.append(f"  {anomaly_advice(data)}")
+    if softmarker_advice(data, ANOMALY):
+        L.append(f"  {softmarker_advice(data, ANOMALY)}")
+    for _n in softmarker_notes(data):
+        L.append(f"  [Report body] {_n}")
     return "\n".join(L)
 
 
@@ -1997,10 +2670,9 @@ def render_ob_preview(data, template_id):
     if template_id == ANOMALY:
         return render_anomaly_preview(data)
     lines = []
-    lines.append(f"NAME :- {data.get('patient_name', '')}        DATE :- {data.get('report_date', '')}")
-    lines.append(f"AGE/SEX :- {data.get('patient_age', '')}Y/ {data.get('p_sex', 'F')}        REF. BY:- {data.get('referred_by', '')}")
-    lines.append("")
-    lines.append("       COLOR DOPPLER OBSTETRICS REPORT" if template_id == COLOR_DOPPLER else "         ULTRASOUND OBSTETRICS REPORT")
+    lines.append(f"        {REPORT_TITLES.get(template_id, 'USG OBS')}")
+    lines.append(f"NAME :-  {data.get('patient_name', '')}        DATE :-  {data.get('report_date', '')}")
+    lines.append(f"AGE/SEX :-  {data.get('patient_age', '')}Y/{data.get('p_sex', 'F')}        REF. BY :-  {data.get('referred_by', '')}")
     lines.append("")
 
     if template_id == "EARLY_OBS":
@@ -2019,19 +2691,7 @@ def render_ob_preview(data, template_id):
         lines.extend(dating_preview(data))
 
     elif template_id == "NT_NB":
-        lines.append("NT / NB SCAN DETAILS:")
-        lines.append(f"  CRL: {data.get('crl', '')}mm")
-        lines.append(f"  NT: {data.get('nt', '')}mm")
-        lines.append(f"  Nasal Bone: {data.get('nasal_bone', '')}")
-        lines.append(f"  FHR: {data.get('fhr_val', '')} bpm")
-        lines.append(f"  DV PI: {data.get('dv_pi', '')}"
-                     + (f" (Percentile: {data.get('dv_pct')}%)" if data.get("dv_pct") else "")
-                     + f" (A-wave: {data.get('dv_awave', '')})")
-        lines.append("")
-        lines.append(f"  Placenta: {data.get('placenta_pos', '')}")
-        lines.append(f"  Cervix: {fmt_cm(data.get('cervix', ''))}")
-        lines.append("")
-        lines.extend(dating_preview(data))
+        lines.extend(nt_nb_preview(data))
 
     else:
         # Combine Presentation and Lie
@@ -2130,6 +2790,8 @@ def render_ob_preview(data, template_id):
 
         if template_id in ("T3", COLOR_DOPPLER) and data.get('measure_scar'): 
             lines.append(f"Scar Thickness: {scar_text(data.get('scar_size', ''))}")
+        for _n in softmarker_notes(data):
+            lines.append(_n)
 
         # --- DOPPLER SECTION PREVIEW ---
         if any(data.get(k) for k in DOPPLER_KEYS):
@@ -2168,14 +2830,14 @@ def render_ob_preview(data, template_id):
                 _cp = f" (Percentile: {data.get('cpr_pct')}%{'' if CPR_PERCENTILE_VALIDATED else ' - provisional'})" if data.get("cpr_pct") else ""
                 lines.append(f"  CPR (MCA PI / UA PI): {data.get('cpr')}{_cp}")
 
-    lines.append(""); lines.append("IMPRESSION:")
+    lines.append(""); lines.append("OPINION:" if template_id == "NT_NB" else "IMPRESSION:")
     mean_age = data.get('mean_age', '')
     
     imp_map = {
         "Blighted": f"INTRA UTERINE EMPTY GESTATIONAL SAC OF {data.get('ga_crl', '')} +/-1w WITH NO APPRECIABLE FETAL POLE OR YOLK SAC - LIKELY EARLY PREGNANCY FAILURE (BLIGHTED OVUM).",
         "NotYet": f"Intra uterine pregnancy of {data.get('ga_crl', '')} +/-1w with not yet appreciable cardiac activity. Adv- Review scan after 2 weeks.",
         "Present": f"Intra uterine live pregnancy of {data.get('ga_crl', '')} +/-1w with good cardiac activity.",
-        "NT_NB": f"Single live fetus of approx. {mean_age} gestation age. NT measures {data.get('nt', '')}mm. Nasal bone is {data.get('nasal_bone', '').lower()}."
+        "NT_NB": nt_nb_opinion(data)
     }
 
     if template_id == "EARLY_OBS":
@@ -2188,19 +2850,28 @@ def render_ob_preview(data, template_id):
     else:
         pres_text = presentation_text(data)
             
-        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text}{',' if _is_lie_presentation(data) else ''} of approx. {mean_age} gestation age."
+        imp_text = f"Ultrasound obstetric reveals single live intrauterine fetus in {pres_text}{',' if _is_lie_presentation(data) else ''} of approx. {mean_age} gestation age"
+        _psv_f = doppler_psv_finding(data) if template_id in ("T3", COLOR_DOPPLER) else ""
+        _pi_f = doppler_pi_findings(data, capitalise=(template_id == "T3")) if template_id in ("T3", COLOR_DOPPLER) else []
+        _inline = softmarker_phrases(data) + (_pi_f if template_id == "T3" else []) + ([_psv_f] if _psv_f else [])
+        imp_text += impression_with_clause(_inline, data)
+        imp_text += "."
         
     lines.append(f"  - {imp_text}")
     if template_id == COLOR_DOPPLER and doppler_status(data)["all_normal"]:
         lines.append("")
         lines.append(f"  - {NORMAL_DOPPLER_LINE}")
+    if template_id == COLOR_DOPPLER and _pi_f:
+        lines.append("")
+        lines.append(f"  - Doppler study reveals {_join_and(_pi_f)}.")
     _sf = smaller_fetus_remark(data) if template_id not in ("EARLY_OBS", "NT_NB") else ""
     if _sf:
         lines.append(""); lines.append(f"  - {_sf}")
-    _adv = doppler_advice(data) if template_id in ("T3", COLOR_DOPPLER) else ""
-    if _adv:
+    for _a in ((doppler_advice_list(data) if template_id in ("T3", COLOR_DOPPLER) else [])
+               + ([softmarker_advice(data, template_id)] if template_id in ("T16", "T3", COLOR_DOPPLER)
+                  and softmarker_advice(data, template_id) else [])):
         lines.append("")
-        lines.append(f"  {_adv}")
+        lines.append(f"  {_a}")
 
     lines.append("")
     lines.append("PNDT DISCLAIMER: The radiologist has not conducted or caused to conduct any pre-natal diagnostic technique for the purpose of determining fetal sex.")
@@ -2305,12 +2976,22 @@ if 'patient_name' in sr_data and sr_data['patient_name']:
 if 'patient_age' in sr_data and sr_data['patient_age']:
     st.session_state["p_age_input"] = sr_data['patient_age']
 
+if "p_date_input" not in st.session_state:
+    st.session_state["p_date_input"] = datetime.now().strftime("%d-%b-%y")
+if "p_ref_input" not in st.session_state:
+    st.session_state["p_ref_input"] = ""
+_sr_demo_v = st.session_state.get("dicom_version", 0)
+if sr_data and st.session_state.get("demo_applied_v") != _sr_demo_v:     # scan date / referring doctor from the SR, once per load
+    if sr_data.get("study_date"): st.session_state["p_date_input"] = sr_data["study_date"]
+    if sr_data.get("referred_by"): st.session_state["p_ref_input"] = sr_data["referred_by"]
+    st.session_state["demo_applied_v"] = _sr_demo_v
+
 c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 2, 3])
 with c1: p_name = st.text_input("Name", key="p_name_input")
 with c2: p_age = st.text_input("Age", key="p_age_input")
 with c3: p_sex = st.radio("Sex", ["F", "M"], horizontal=True)
-with c4: p_date = st.text_input("Date", value=datetime.now().strftime("%d-%b-%y"))
-with c5: p_ref = st.text_input("Referred by")
+with c4: p_date = st.text_input("Date", key="p_date_input")
+with c5: p_ref = st.text_input("Referred by", key="p_ref_input")
 
 data = {"patient_name": p_name, "patient_age": p_age, "report_date": p_date, "referred_by": p_ref, "p_sex": p_sex}
 
@@ -2416,6 +3097,10 @@ with col1:
         if 'crl' in sr_data: st.session_state[f"sr_crl_{v}"] = sr_data['crl']
         if 'nt' in sr_data: st.session_state[f"sr_nt_{v}"] = sr_data['nt']
         if 'nasal_bone' in sr_data: st.session_state[f"sr_nasal_bone_{v}"] = sr_data['nasal_bone']
+        if 'nb_len' in sr_data: st.session_state[f"sr_nb_len_{v}"] = sr_data['nb_len']
+        if 'nb_pct' in sr_data: st.session_state[f"sr_nb_pct_{v}"] = sr_data['nb_pct']
+        if 'crl_wks' in sr_data:
+            st.session_state[f"sr_ga_crl_{v}"] = f"{sr_data['crl_wks']}wks {int(sr_data.get('crl_dys', 0)):02d}days"
         if 'fetal_weight' in sr_data: st.session_state[f"sr_fetal_weight_{v}"] = sr_data['fetal_weight']
         if 'fetal_weight_pct' in sr_data: st.session_state[f"sr_fetal_weight_pct_edit_{v}"] = sr_data['fetal_weight_pct']
         if 'fhr' in sr_data: st.session_state[f"sr_fhr_{v}"] = sr_data['fhr']
@@ -2472,10 +3157,38 @@ with col1:
             data["crl"] = b1.text_input("CRL (mm)", value=st.session_state.get(f"sr_crl_{v}", ""), key=f"sr_crl_{v}")
             data["nt"] = b2.text_input("NT (mm)", value=st.session_state.get(f"sr_nt_{v}", ""), key=f"sr_nt_{v}")
             
+            b1, b2, b3 = st.columns(3)
+            data["nasal_bone"] = b1.text_input("Nasal Bone (Present / Absent)", value=st.session_state.get(f"sr_nasal_bone_{v}", ""), key=f"sr_nasal_bone_{v}")
+            data["nb_len"] = b2.text_input("Nasal Bone length (mm)", value=st.session_state.get(f"sr_nb_len_{v}", ""), key=f"sr_nb_len_{v}")
+            data["nb_pct"] = b3.text_input("Nasal Bone percentile (machine)", value=st.session_state.get(f"sr_nb_pct_{v}", ""), key=f"sr_nb_pct_{v}")
+
             b1, b2 = st.columns(2)
-            data["nasal_bone"] = b1.text_input("Nasal Bone", value=st.session_state.get(f"sr_nasal_bone_{v}", ""), key=f"sr_nasal_bone_{v}")
-            data["fhr_val"] = b2.text_input("FHR (bpm)", value=st.session_state.get(f"sr_fhr_{v}", ""), key=f"sr_fhr_{v}")
-            
+            data["fhr_val"] = b1.text_input("FHR (bpm)", value=st.session_state.get(f"sr_fhr_{v}", ""), key=f"sr_fhr_{v}")
+            data["ga_crl"] = b2.text_input("GA by CRL", value=st.session_state.get(f"sr_ga_crl_{v}", ""), key=f"sr_ga_crl_{v}")
+            st.caption("Uterine Arteries (pre-eclampsia screen)")
+            c1, c2, c3 = st.columns(3)
+            data["uterine_right_pi"] = c1.text_input("Right PI", key=f"sr_uterine_right_pi_{v}")
+            data["uterine_right_ri"] = c2.text_input("Right RI", key=f"sr_uterine_right_ri_{v}")
+            data["uterine_right_sd"] = c3.text_input("Right S/D", key=f"sr_uterine_right_sd_{v}")
+            c1, c2, c3 = st.columns(3)
+            data["uterine_left_pi"] = c1.text_input("Left PI", key=f"sr_uterine_left_pi_{v}")
+            data["uterine_left_ri"] = c2.text_input("Left RI", key=f"sr_uterine_left_ri_{v}")
+            data["uterine_left_sd"] = c3.text_input("Left S/D", key=f"sr_uterine_left_sd_{v}")
+
+            def _nt_mean_of(*vals):
+                nums = []
+                for x in vals:
+                    try: nums.append(float(x))
+                    except (TypeError, ValueError): pass
+                return f"{sum(nums)/len(nums):.2f}" if nums else ""
+            _mpi = _nt_mean_of(data["uterine_left_pi"], data["uterine_right_pi"]) or sr_data.get("uterine_pi", "")
+            _mri = _nt_mean_of(data["uterine_left_ri"], data["uterine_right_ri"]) or sr_data.get("uterine_ri", "")
+            _msd = _nt_mean_of(data["uterine_left_sd"], data["uterine_right_sd"]) or sr_data.get("uterine_sd", "")
+            c1, c2, c3 = st.columns(3)
+            data["uterine_pi"] = c1.text_input("Mean Uterine PI", value=_mpi, key=f"sr_uterine_pi_mean_{v}_{_mpi}")
+            data["uterine_ri"] = c2.text_input("Mean Uterine RI", value=_mri, key=f"sr_uterine_ri_mean_{v}_{_mri}")
+            data["uterine_sd"] = c3.text_input("Mean Uterine S/D", value=_msd, key=f"sr_uterine_sd_mean_{v}_{_msd}")
+
             data["edd_lmp"] = st.text_input("EDD (LMP)", value=st.session_state.get(f"sr_edd_lmp_{v}", ""), key=f"sr_edd_lmp_{v}")
             data["edd_cua"] = st.text_input("EDD (CUA)", value=st.session_state.get(f"sr_edd_cua_{v}", ""), key=f"sr_edd_cua_{v}")
         else:
@@ -2713,14 +3426,31 @@ with col1:
 
     elif template_id == "NT_NB":
         with st.expander("Typist Inputs (NT / NB)", expanded=True):
-            data["dv_pi"] = st.text_input("Ductus Venosus PI", value="")
-            data["dv_awave"] = st.selectbox("DV A-Wave", ["Positive", "Absent", "Reversed"])
-            
+            b1, b2, b3 = st.columns(3)
+            data["cardiac_status"] = b1.selectbox("Cardiac pulsations", ["Present", "Absent"], key="nt_cardiac")
+            data["cervix"] = b2.text_input("Cervix length", value="Normal", key="nt_cervix")
+            data["internal_os"] = b3.selectbox("Internal Os", ["Closed", "Open"], key="nt_os")
+            b1, b2 = st.columns(2)
+            data["subchorionic_present"] = b1.checkbox("Subchorionic collection present", key="nt_sch")
+            if data["subchorionic_present"]:
+                data["subchorionic_grade"] = b1.radio("Grade", ["Grade-I", "Grade-I/II", "Grade-II", "Grade-II/III"], horizontal=True, key="nt_sch_g")
+            data["corpus_present"] = b2.checkbox("Corpus luteal cyst present", key="nt_cl")
+            if data["corpus_present"]:
+                d1, d2 = b2.columns(2)
+                data["corpus_side"] = d1.selectbox("Side", ["Right", "Left"], key="nt_cl_s")
+                data["corpus_size"] = d2.text_input("Size (mm)", key="nt_cl_z")
             b1, b2 = st.columns(2)
             _plac_opts = PLACENTA_OPTS
-            # The key forces Streamlit to refresh the widget
             data["placenta_pos"] = b1.selectbox("Placenta Position", _plac_opts, key="placenta_pos_widget")
             data["placenta_os"] = b2.selectbox("Placenta Relation to Os", ["away from the Os", "Low-lying", "Placenta Praevia"], key="placenta_os_widget")
+            data["choroid"] = st.selectbox("Choroid plexi / Falx", ["Appreciated, appear Normal", "Not well visualised"], key="nt_choroid")
+            st.markdown("**First-trimester Doppler (percentiles are worked out from the CRL; valid for CRL 45-84 mm)**")
+            b1, b2 = st.columns(2)
+            data["uterine_notching"] = b1.selectbox("Uterine artery notching", ["No notching", "Unilateral notching", "Bilateral notching"], key="nt_notch")
+            data["conception"] = b2.selectbox("Conception (UtA PI reference)", ["Natural", "IVF"], key="nt_conception")
+            b1, b2 = st.columns(2)
+            data["dv_pi"] = b1.text_input("Ductus Venosus PI", value="", key="nt_dvpi")
+            data["dv_awave"] = b2.selectbox("DV A-Wave", ["Positive", "Absent", "Reversed"], key="nt_dvwave")
 
     else:
         with st.expander("Anatomy & Presentation", expanded=True):
@@ -2767,6 +3497,27 @@ with col1:
                 data["measure_scar"] = st.checkbox("Measure Scar Thickness")
                 if data["measure_scar"]:
                     data["scar_size"] = st.text_input("Scar Size (mm)")
+
+            # --- Soft markers (keys carry the form version, so they clear with a new patient) ---
+            st.markdown("**Soft Markers**")
+            data["cpc"] = st.checkbox("Choroid plexus cyst", key=f"sr_cpc_{v}")
+            if data["cpc"]:
+                k1, k2 = st.columns(2)
+                data["cpc_right"] = k1.checkbox("Right", key=f"sr_cpc_right_{v}")
+                if data["cpc_right"]:
+                    data["cpc_right_size"] = k1.text_input("Right cyst size (mm)", key=f"sr_cpc_right_size_{v}")
+                data["cpc_left"] = k2.checkbox("Left", key=f"sr_cpc_left_{v}")
+                if data["cpc_left"]:
+                    data["cpc_left_size"] = k2.text_input("Left cyst size (mm)", key=f"sr_cpc_left_size_{v}")
+                if not (data["cpc_right"] or data["cpc_left"]):
+                    st.caption("Tick Right and/or Left.")
+            data["eif"] = st.checkbox("Echogenic intracardiac focus (EIF)", key=f"sr_eif_{v}")
+            if data["eif"]:
+                e1, e2 = st.columns(2)
+                data["eif_left"] = e1.checkbox("Left ventricle", key=f"sr_eif_left_{v}")
+                data["eif_right"] = e2.checkbox("Right ventricle", key=f"sr_eif_right_{v}")
+                if not (data["eif_left"] or data["eif_right"]):
+                    st.caption("Tick Left and/or Right ventricle.")
 
     if template_id == ANOMALY:
         with st.expander("🧠 Anomaly Scan Measurements", expanded=True):
@@ -2823,7 +3574,7 @@ with col2:
     st.subheader("⬇️ Download Report")
     _is_doppler_tpl = template_id == COLOR_DOPPLER
     _is_anomaly_tpl = template_id == ANOMALY
-    _color_idx = PINK_THEME_INDEX if _is_doppler_tpl else load_color_index()   # Color Doppler is always pink
+    _color_idx = PINK_THEME_INDEX if _is_doppler_tpl else theme_for_template(template_id, load_color_index())   # Color Doppler is always pink; NT/NB skips Blue
     data["color_theme"] = _color_idx
     docx_bytes = build_docx_bytes(data, template_id)
     
@@ -2842,7 +3593,7 @@ with col2:
         data=docx_bytes,
         file_name=_filename,
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        on_click=None if (_is_doppler_tpl or _is_anomaly_tpl) else advance_color_index   # Color Doppler does not use up a rotation colour
+        on_click=None if (_is_doppler_tpl or _is_anomaly_tpl) else (lambda _u=_color_idx: advance_color_index(_u))   # Color Doppler does not use up a rotation colour
     )
     if _is_anomaly_tpl:
         st.caption("Table colour: Blue (fixed for Anomaly Scan reports; the colour rotation is not affected)")
